@@ -29,7 +29,7 @@ data class TelemetryUiState(
     val currentScreen: AppScreen = AppScreen.MAIN_TABS,
     val selectedTab: BottomNavTab = BottomNavTab.CALENDAR,
     val lastMainTab: BottomNavTab = BottomNavTab.CALENDAR,
-    val addRecordSubMode: AddRecordSubMode = AddRecordSubMode.SELECTION,
+    val addRecordSubMode: AddRecordSubMode = AddRecordSubMode.SCAN_MEDICATION_BOX,
     val biomarkers: BiomarkerTelemetry = BiomarkerTelemetry(),
     val cardSlots: List<ModularCardItem?> = defaultCardSlots(),
     val cardLibrary: List<ModularCardItem> = defaultCardLibrary(),
@@ -301,13 +301,23 @@ class TelemetryViewModel : ViewModel() {
         _uiState.update { it.copy(currentScreen = AppScreen.MAIN_TABS) }
     }
 
-    fun selectBottomTab(tab: BottomNavTab, initialSubMode: AddRecordSubMode = AddRecordSubMode.SELECTION) {
+    fun selectBottomTab(tab: BottomNavTab, initialSubMode: AddRecordSubMode = AddRecordSubMode.SCAN_MEDICATION_BOX) {
         _uiState.update { state ->
             val updatedLastMain = if (tab != BottomNavTab.ADD_RECORD) tab else state.lastMainTab
+            val targetSubMode = if (tab == BottomNavTab.ADD_RECORD) {
+                if (initialSubMode == AddRecordSubMode.SELECTION) {
+                    AddRecordSubMode.SCAN_MEDICATION_BOX
+                } else {
+                    initialSubMode
+                }
+            } else {
+                // Preserve current subMode while exiting so AnimatedContent transitions smoothly from the active sub-view directly to Home
+                state.addRecordSubMode
+            }
             state.copy(
                 selectedTab = tab,
                 lastMainTab = updatedLastMain,
-                addRecordSubMode = if (tab == BottomNavTab.ADD_RECORD) initialSubMode else AddRecordSubMode.SELECTION,
+                addRecordSubMode = targetSubMode,
                 isCardEditMode = false,
                 browsingSlotIndex = null,
                 currentScreen = AppScreen.MAIN_TABS
@@ -319,7 +329,6 @@ class TelemetryViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 selectedTab = state.lastMainTab,
-                addRecordSubMode = AddRecordSubMode.SELECTION,
                 isCardEditMode = false,
                 browsingSlotIndex = null
             )
@@ -489,7 +498,6 @@ class TelemetryViewModel : ViewModel() {
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CARD_SETTINGS,
                 lastMainTab = BottomNavTab.CARD_SETTINGS,
-                addRecordSubMode = AddRecordSubMode.SELECTION,
                 bannerMessage = if (orderExtractedPlans.isNotEmpty()) {
                     "药盒已录入，并从医嘱自动同步生成 ${orderExtractedPlans.size + 1} 项吃药卡片"
                 } else {
@@ -538,7 +546,6 @@ class TelemetryViewModel : ViewModel() {
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CARD_SETTINGS,
                 lastMainTab = BottomNavTab.CARD_SETTINGS,
-                addRecordSubMode = AddRecordSubMode.SELECTION,
                 bannerMessage = "已根据医嘱自动生成 ${extracted.size} 项用药用法并同步至卡片墙"
             )
             refreshModularMedicationCards(updatedState)
@@ -1016,7 +1023,6 @@ class TelemetryViewModel : ViewModel() {
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CALENDAR,
                 lastMainTab = BottomNavTab.CALENDAR,
-                addRecordSubMode = AddRecordSubMode.SELECTION,
                 bannerMessage = "识别指标已同步至病程日历跑道图"
             )
         }
@@ -1075,7 +1081,6 @@ class TelemetryViewModel : ViewModel() {
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CALENDAR,
                 lastMainTab = BottomNavTab.CALENDAR,
-                addRecordSubMode = AddRecordSubMode.SELECTION,
                 bannerMessage = if (autoExtractedMeds.isNotEmpty()) {
                     "病程记录已保存 • 已根据医嘱自动同步生成 ${autoExtractedMeds.size} 项吃药卡片"
                 } else {

@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -16,6 +17,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -161,58 +164,91 @@ fun ClinicalMainTopBar(
         shadowElevation = 1.dp,
         modifier = modifier.fillMaxWidth()
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .fillMaxWidth()
                 .height(62.dp)
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.CenterStart
         ) {
-            if (selectedTab == BottomNavTab.ADD_RECORD) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(onClick = onBackFromAddRecord)
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                        .testTag("submode_back_header"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回上一页",
-                        tint = ClinicalOnSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = "返回上一页",
-                        style = ClinicalTextStyles.headlineSm.copy(
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = ClinicalOnSurface
-                    )
-                }
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(26.dp)
-                ) {
-                    TopNavUnderlineTab(
-                        label = stringResource(R.string.nav_calendar),
-                        isSelected = activeTopTab == BottomNavTab.CALENDAR,
-                        onClick = { onSelectTab(BottomNavTab.CALENDAR) },
-                        testTag = "nav_tab_calendar"
-                    )
+            AnimatedContent(
+                targetState = selectedTab == BottomNavTab.ADD_RECORD,
+                transitionSpec = {
+                    if (targetState) {
+                        // Entering subpage: "← 返回上一页" slides in from right/fade while tabs fade/slide left
+                        (fadeIn(animationSpec = tween(220)) +
+                            slideInHorizontally(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { fullWidth -> fullWidth / 5 })
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(150)) +
+                                    slideOutHorizontally(animationSpec = tween(180)) { fullWidth -> -fullWidth / 5 }
+                            )
+                    } else {
+                        // Returning to home: tabs slide back in from left while "← 返回上一页" slides out right
+                        (fadeIn(animationSpec = tween(220)) +
+                            slideInHorizontally(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { fullWidth -> -fullWidth / 5 })
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(150)) +
+                                    slideOutHorizontally(animationSpec = tween(180)) { fullWidth -> fullWidth / 5 }
+                            )
+                    }.using(SizeTransform(clip = false))
+                },
+                label = "top_bar_mode_transition"
+            ) { isAddRecordMode ->
+                if (isAddRecordMode) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(onClick = onBackFromAddRecord)
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                            .testTag("submode_back_header"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回上一页",
+                            tint = ClinicalOnSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "返回上一页",
+                            style = ClinicalTextStyles.headlineSm.copy(
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = ClinicalOnSurface
+                        )
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(26.dp)
+                    ) {
+                        TopNavUnderlineTab(
+                            label = stringResource(R.string.nav_calendar),
+                            isSelected = activeTopTab == BottomNavTab.CALENDAR,
+                            onClick = { onSelectTab(BottomNavTab.CALENDAR) },
+                            testTag = "nav_tab_calendar"
+                        )
 
-                    TopNavUnderlineTab(
-                        label = stringResource(R.string.nav_card_settings),
-                        isSelected = activeTopTab == BottomNavTab.CARD_SETTINGS,
-                        onClick = { onSelectTab(BottomNavTab.CARD_SETTINGS) },
-                        testTag = "nav_tab_card_settings"
-                    )
+                        TopNavUnderlineTab(
+                            label = stringResource(R.string.nav_card_settings),
+                            isSelected = activeTopTab == BottomNavTab.CARD_SETTINGS,
+                            onClick = { onSelectTab(BottomNavTab.CARD_SETTINGS) },
+                            testTag = "nav_tab_card_settings"
+                        )
+                    }
                 }
             }
         }
@@ -902,19 +938,22 @@ fun AddTelemetryRecordScreen(
     ) {
         AnimatedContent(
             targetState = subMode,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(240, easing = FastOutSlowInEasing)) +
+                    slideInHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                    ) { fullWidth -> fullWidth / 6 })
+                    .togetherWith(
+                        fadeOut(animationSpec = tween(180)) +
+                            slideOutHorizontally(
+                                animationSpec = tween(220, easing = FastOutSlowInEasing)
+                            ) { fullWidth -> -fullWidth / 6 }
+                    )
+                    .using(SizeTransform(clip = false))
+            },
             label = "add_record_mode_transition"
         ) { mode ->
             when (mode) {
-                AddRecordSubMode.SELECTION -> {
-                    AddRecordModeSelectionView(
-                        medicationCount = medicationPlans.size,
-                        onBack = onNavigateBack,
-                        onSelectPhotoOcr = { onSelectSubMode(AddRecordSubMode.PHOTO_OCR) },
-                        onSelectScanMedicationBox = { onSelectSubMode(AddRecordSubMode.SCAN_MEDICATION_BOX) },
-                        onSelectManualTimeline = { onSelectSubMode(AddRecordSubMode.MANUAL_TIMELINE) }
-                    )
-                }
-
                 AddRecordSubMode.PHOTO_OCR -> {
                     PhotoOcrRecognitionView(
                         currentBiomarkers = currentBiomarkers,
@@ -923,18 +962,19 @@ fun AddTelemetryRecordScreen(
                     )
                 }
 
-                AddRecordSubMode.SCAN_MEDICATION_BOX -> {
-                    ScanMedicationBoxView(
-                        onBackToSelection = onNavigateBack,
-                        onSaveScannedBox = onAddScannedMedicationBox,
-                        onSyncDoctorOrderOnly = onSyncMedicationsFromDoctorOrder
-                    )
-                }
-
                 AddRecordSubMode.MANUAL_TIMELINE -> {
                     ManualTimelineEntryView(
                         onBackToSelection = onNavigateBack,
                         onSaveToTimeline = onAddManualTimelineRecord
+                    )
+                }
+
+                AddRecordSubMode.SCAN_MEDICATION_BOX,
+                AddRecordSubMode.SELECTION -> {
+                    ScanMedicationBoxView(
+                        onBackToSelection = onNavigateBack,
+                        onSaveScannedBox = onAddScannedMedicationBox,
+                        onSyncDoctorOrderOnly = onSyncMedicationsFromDoctorOrder
                     )
                 }
             }
