@@ -50,6 +50,7 @@ data class TelemetryUiState(
     val isPlayingCadence: Boolean = false,
     val cadenceProgress: Float = 0f,
     val isGeneratingSbar: Boolean = false,
+    val isQuickScanOpen: Boolean = false,
     val bannerMessage: String? = null
 )
 
@@ -431,6 +432,9 @@ class TelemetryViewModel : ViewModel() {
             val cleanDose = dosePerTimeLabel.trim().ifEmpty { "每次1片" }
             val cleanTiming = timingLabel.trim().ifEmpty { "餐后温水送服" }
             val totalDoses = when {
+                cleanFreq.contains("6") || cleanFreq.contains("六") -> 6
+                cleanFreq.contains("5") || cleanFreq.contains("五") -> 5
+                cleanFreq.contains("4") || cleanFreq.contains("四") -> 4
                 cleanFreq.contains("3") || cleanFreq.contains("三") -> 3
                 cleanFreq.contains("2") || cleanFreq.contains("两") || cleanFreq.contains("二") -> 2
                 else -> 1
@@ -1118,6 +1122,14 @@ class TelemetryViewModel : ViewModel() {
                 )
             )
         }
+    }
+
+    fun openQuickScan() {
+        _uiState.update { it.copy(isQuickScanOpen = true) }
+    }
+
+    fun closeQuickScan() {
+        _uiState.update { it.copy(isQuickScanOpen = false) }
     }
 
     private fun clearBannerAfterDelay() {
