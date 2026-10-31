@@ -46,6 +46,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EventRepeat
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -101,9 +102,17 @@ fun DiseaseCalendarScreen(
     uiState: TelemetryUiState,
     onSelectDay: (String) -> Unit,
     onToggleTimelineEvent: (String) -> Unit,
+    onLongPressTimelineEvent: (String) -> Unit,
+    onSelectAllTimelineEvents: () -> Unit,
+    onClearTimelineSelection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val biomarkers = uiState.biomarkers
+    val isSelectionMode = uiState.selectedTimelineEventIds.isNotEmpty()
+
+    if (isSelectionMode) {
+        BackHandler(onBack = onClearTimelineSelection)
+    }
 
     Box(
         modifier = modifier
@@ -131,18 +140,12 @@ fun DiseaseCalendarScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 7.dp)
-                            Text(
-                                text = uiState.bannerMessage,
-                                style = ClinicalTextStyles.bodySm,
-                                color = ClinicalSurface
-                            )
-                        }
+                        Text(
+                            text = uiState.bannerMessage,
+                            style = ClinicalTextStyles.bodySm,
+                            color = ClinicalSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
                     }
                 }
             }
@@ -164,7 +167,7 @@ fun DiseaseCalendarScreen(
                 )
             }
 
-            // 3. Collapsible Disease Events Timeline Header
+            // 3. Collapsible Disease Events Timeline Header (with multi-select status)
             item(key = "timeline_header") {
                 Row(
                     modifier = Modifier
@@ -173,27 +176,92 @@ fun DiseaseCalendarScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(R.string.event_logs_header),
-                        style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
-                        color = ClinicalSecondary
-                    )
-                    Text(
-                        text = "共 ${uiState.totalRecordCount} 条记录",
-                        style = ClinicalTextStyles.labelMonoSm,
-                        color = ClinicalOnSurface
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (isSelectionMode) {
+                                "已选 ${uiState.selectedTimelineEventIds.size} 条病程"
+                            } else {
+                                stringResource(R.string.event_logs_header)
+                            },
+                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (isSelectionMode) ClinicalOnSurface else ClinicalSecondary
+                        )
+                        if (!isSelectionMode) {
+                            Surface(
+                                shape = CircleShape,
+                                color = ClinicalSurfaceContainer
+                            ) {
+                                Text(
+                                    text = "长按多选",
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 10.sp),
+                                    color = ClinicalSecondary,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (isSelectionMode) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = ClinicalSurfaceContainerLow,
+                                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable(onClick = onSelectAllTimelineEvents)
+                                    .testTag("btn_select_all_timeline")
+                            ) {
+                                Text(
+                                    text = "全选",
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                                    color = ClinicalOnSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                )
+                            }
+                            Surface(
+                                shape = CircleShape,
+                                color = ClinicalSurfaceContainer,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable(onClick = onClearTimelineSelection)
+                                    .testTag("btn_clear_timeline_selection")
+                            ) {
+                                Text(
+                                    text = "取消",
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                    color = ClinicalOnSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "共 ${uiState.totalRecordCount} 条记录",
+                            style = ClinicalTextStyles.labelMonoSm,
+                            color = ClinicalOnSurface
+                        )
+                    }
                 }
             }
 
-            // 4. Timeline Cards (collapsed by default)
+            // 4. Timeline Cards (collapsed by default, long-press to multi-select)
             items(
                 items = uiState.timelineEvents,
                 key = { it.id }
             ) { event ->
                 TimelineEventCard(
                     event = event,
-                    onToggleExpand = { onToggleTimelineEvent(event.id) }
+                    isSelectionMode = isSelectionMode,
+                    isSelected = event.id in uiState.selectedTimelineEventIds,
+                    onToggleExpand = { onToggleTimelineEvent(event.id) },
+                    onLongPress = { onLongPressTimelineEvent(event.id) }
                 )
             }
         }
@@ -932,19 +1000,44 @@ private fun WeeklyDiseaseCalendarCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TimelineEventCard(
     event: TimelineEvent,
-    onToggleExpand: () -> Unit
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    onToggleExpand: () -> Unit,
+    onLongPress: () -> Unit
 ) {
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainer,
+        animationSpec = tween(durationMillis = 180),
+        label = "timeline_border_${event.id}"
+    )
+    val cardScale by animateFloatAsState(
+        targetValue = if (isSelected) 0.985f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "timeline_scale_${event.id}"
+    )
+
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = ClinicalSurfaceContainerLowest,
-        border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            }
             .clip(RoundedCornerShape(24.dp))
-            .clickable(onClick = onToggleExpand)
+            .combinedClickable(
+                onClick = onToggleExpand,
+                onLongClick = onLongPress
+            )
             .testTag("timeline_event_${event.id}")
     ) {
         Column(
@@ -961,10 +1054,36 @@ private fun TimelineEventCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    AnimatedVisibility(visible = isSelectionMode) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(
+                                    color = if (isSelected) ClinicalOnSurface else Color.Transparent,
+                                    shape = CircleShape
+                                )
+                                .border(
+                                    width = 1.5.dp,
+                                    color = if (isSelected) ClinicalOnSurface else ClinicalHairlineBorder,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = "已选中",
+                                    tint = ClinicalSurface,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                    }
+
                     Text(
                         text = event.timestampLabel,
                         style = ClinicalTextStyles.labelMonoSm,
-                        color = if (event.isExpanded) ClinicalOnSurface else ClinicalSecondary
+                        color = if (event.isExpanded || isSelected) ClinicalOnSurface else ClinicalSecondary
                     )
 
                     if (event.badgeText.isNotBlank()) {
@@ -973,18 +1092,12 @@ private fun TimelineEventCard(
                                 shape = CircleShape,
                                 color = ClinicalPrimaryContainer
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    PulsingBeaconDot(color = ClinicalSurface, size = 6.dp)
-                                    Text(
-                                        text = event.badgeText,
-                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                                        color = ClinicalSurface
-                                    )
-                                }
+                                Text(
+                                    text = event.badgeText,
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                                    color = ClinicalSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                )
                             }
                         } else {
                             Surface(

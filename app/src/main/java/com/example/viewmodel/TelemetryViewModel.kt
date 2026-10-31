@@ -40,10 +40,12 @@ data class TelemetryUiState(
     val calendarDays: List<CalendarDayItem> = defaultCalendarDays(),
     val selectedDayNumber: String = "12",
     val timelineEvents: List<TimelineEvent> = defaultTimelineEvents(),
+    val selectedTimelineEventIds: Set<String> = emptySet(),
     val totalRecordCount: Int = 14,
     val symptomTags: List<SymptomTag> = defaultSymptomTags(),
-    val narrativeText: String = DEFAULT_NARRATIVE,
+    val narrativeText: String = "",
     val sbarDossier: SbarDossier = defaultSbarDossier(),
+    val hasGeneratedScript: Boolean = false,
     val isCopiedFeedback: Boolean = false,
     val isPlayingCadence: Boolean = false,
     val cadenceProgress: Float = 0f,
@@ -778,10 +780,50 @@ class TelemetryViewModel : ViewModel() {
 
     fun toggleTimelineEvent(eventId: String) {
         _uiState.update { state ->
-            state.copy(
-                timelineEvents = state.timelineEvents.map { event ->
-                    if (event.id == eventId) event.copy(isExpanded = !event.isExpanded) else event
+            if (state.selectedTimelineEventIds.isNotEmpty()) {
+                val updatedSelection = if (eventId in state.selectedTimelineEventIds) {
+                    state.selectedTimelineEventIds - eventId
+                } else {
+                    state.selectedTimelineEventIds + eventId
                 }
+                state.copy(selectedTimelineEventIds = updatedSelection)
+            } else {
+                state.copy(
+                    timelineEvents = state.timelineEvents.map { event ->
+                        if (event.id == eventId) event.copy(isExpanded = !event.isExpanded) else event
+                    }
+                )
+            }
+        }
+    }
+
+    fun toggleTimelineEventSelection(eventId: String) {
+        _uiState.update { state ->
+            val updatedSelection = if (eventId in state.selectedTimelineEventIds) {
+                state.selectedTimelineEventIds - eventId
+            } else {
+                state.selectedTimelineEventIds + eventId
+            }
+            state.copy(selectedTimelineEventIds = updatedSelection)
+        }
+    }
+
+    fun selectAllTimelineEvents() {
+        _uiState.update { state ->
+            state.copy(selectedTimelineEventIds = state.timelineEvents.map { it.id }.toSet())
+        }
+    }
+
+    fun clearTimelineSelection() {
+        _uiState.update { it.copy(selectedTimelineEventIds = emptySet()) }
+    }
+
+    fun removeSelectedTimelineEventInGenerator(eventId: String) {
+        _uiState.update { state ->
+            if (state.selectedTimelineEventIds.size <= 1) return@update state
+            state.copy(
+                selectedTimelineEventIds = state.selectedTimelineEventIds - eventId,
+                hasGeneratedScript = false
             )
         }
     }
@@ -801,55 +843,84 @@ class TelemetryViewModel : ViewModel() {
         _uiState.update { it.copy(narrativeText = clipped) }
     }
 
+    private fun desensitizeClinicalText(raw: String): String {
+        return raw
+            .replace(Regex("""[张王李赵陈刘杨黄周吴徐孙胡朱高林何郭马罗][A-Za-z\u4e00-\u9fa5]{0,2}(主任|医师|医生|教授|大夫)"""), "[主治医师]")
+            .replace(Regex("""(主任医师|副主任医师|主治医师)\s*[A-Za-z\u4e00-\u9fa5]{2,3}"""), "[主治医师]")
+            .replace(Regex("""[\u4e00-\u9fa5]{2,8}(医院|院区|门诊部)"""), "[就诊医院]")
+            .replace(Regex("""\b\d{6,18}\b"""), "[病历号已脱敏]")
+    }
+
     fun generateStructuredSbar() {
         viewModelScope.launch {
             _uiState.update { it.copy(isGeneratingSbar = true) }
-            delay(280)
+            delay(420)
             _uiState.update { state ->
+                val selectedEvents = state.timelineEvents.filter { it.id in state.selectedTimelineEventIds }
+                    .ifEmpty { state.timelineEvents.take(1) }
                 val activeTags = state.symptomTags.filter { it.isActive }
                 val glucose = state.biomarkers.glucoseValue
                 val spo2 = state.biomarkers.spo2Value
                 val temp = state.biomarkers.skinTempValue
-                val customNarrative = state.narrativeText.trim()
+                val customNarrative = desensitizeClinicalText(state.narrativeText.trim())
 
-                val tagSummary = if (activeTags.isEmpty()) {
-                    "近期体征总体平稳"
-                } else {
-                    activeTags.joinToString("、") { it.label }
-                }
+                val timelineLines = selectedEvents.mapIndexed { index, evt ->
+                    val tagPart = if (evt.badgeText.isNotBlank()) "[${evt.badgeText}] " else ""
+                    val cleanDesc = desensitizeClinicalText(evt.description.trimEnd('。'))
+                    val docPart = evt.doctorNote?.let {
+                        " | 关联医嘱：${desensitizeClinicalText(it.content)}"
+                    } ?: ""
+                    "${index + 1}. ${evt.timestampLabel} $tagPart$cleanDesc$docPart"
+                }.joinToString("\n")
 
-                val newSituation = if (customNarrative.isNotEmpty() && customNarrative != DEFAULT_NARRATIVE) {
-                    "“主任您好，目前核心诉求包括：$tagSummary。临床补充情况：$customNarrative（最新血液内含糖量 $glucose mmol/L，血氧浓度 $spo2%，皮肤温度 ${temp}℃）。”"
-                } else {
-                    "“主任您好，近两周激素按计划递减至每日2片，近期血液内含糖量 $glucose mmol/L，血氧浓度 $spo2%，皮肤温度 ${temp}℃，伴随[$tagSummary]，想请您评估当前方案。”"
+                val symptomSummary = buildList {
+                    if (activeTags.isNotEmpty()) {
+                        add(activeTags.joinToString("、") { it.label })
+                    }
+                    if (customNarrative.isNotEmpty()) {
+                        add(customNarrative)
+                    }
+                }.joinToString("；").ifEmpty { "近期无明显新增不适" }
+
+                val desensitizedPrompt = buildString {
+                    appendLine("【角色与任务】请作为临床沟通助手，基于以下已脱敏的病程记录与近期症状，为[患者本人]生成一份简明、重点突出的门诊复诊问诊话术。")
+                    appendLine()
+                    appendLine("【已脱敏病程记录（共 ${selectedEvents.size} 项）】")
+                    appendLine(timelineLines)
+                    appendLine()
+                    appendLine("【近期症状与实时体征】")
+                    appendLine("• 近期症状：$symptomSummary")
+                    appendLine("• 当前体征：血糖 $glucose mmol/L | 血氧 $spo2% | 皮肤温度 ${temp}℃")
+                    appendLine()
+                    append("【输出要求】用第一人称整理成 30 秒内可口述完的病程汇报，并列出需要向[主治医师]确认的用药与复查问题。")
                 }
 
                 val requests = mutableListOf<SbarRequestItem>()
                 var idx = 1
-                if (activeTags.any { it.id == "tag_lab" } || customNarrative.contains("托珠单抗")) {
+                if (activeTags.any { it.id == "tag_lab" } || selectedEvents.any { it.isWarningBadge }) {
                     requests.add(
                         SbarRequestItem(
                             index = idx++,
-                            title = "调整生物制剂周期间隔",
-                            subtitle = "目前托珠单抗每4周一次，是否建议短期内缩短为3周或提前巩固一次？"
+                            title = "指标波动与复查节点确认",
+                            subtitle = "结合已脱敏病程中的化验变化，引导强模型追问是否需调整复查频率或加查炎症指标。"
                         )
                     )
                 }
-                if (activeTags.any { it.id == "tag_tapering" } || requests.isEmpty()) {
+                if (activeTags.any { it.id == "tag_tapering" } || selectedEvents.any { it.doctorNote != null } || requests.isEmpty()) {
                     requests.add(
                         SbarRequestItem(
                             index = idx++,
-                            title = "激素阶梯减量暂停研判",
-                            subtitle = "当前每日2片（美卓乐）是否需维持观察两周，暂缓进一步减至1.5片？"
+                            title = "当前用药与激素阶梯评估",
+                            subtitle = "结合近期病程恢复情况，生成关于口服药及激素剂量维持或减量的核心问询项。"
                         )
                     )
                 }
-                if (activeTags.any { it.id == "tag_fever" || it.id == "tag_joint" || it.id == "tag_rash" }) {
+                if (activeTags.any { it.id == "tag_fever" || it.id == "tag_joint" || it.id == "tag_rash" } || customNarrative.isNotEmpty()) {
                     requests.add(
                         SbarRequestItem(
                             index = idx++,
-                            title = "急性炎症发作控制预案",
-                            subtitle = "若午后体温超38.5℃或皮疹加重，是否需要临时加用非甾体抗炎药对症处理？"
+                            title = "近期症状应对与预警信号",
+                            subtitle = "针对近期出现的症状（$symptomSummary），要求话术中包含居家观察预警标准。"
                         )
                     )
                 }
@@ -857,17 +928,18 @@ class TelemetryViewModel : ViewModel() {
                     requests.add(
                         SbarRequestItem(
                             index = idx,
-                            title = "消化道黏膜保护与乏力评估",
-                            subtitle = "近期服药后胃部不适伴乏力，是否需要调整护胃药剂量或复查肝肾功能电解质？"
+                            title = "服药耐受与护胃方案调整",
+                            subtitle = "针对服药后不适，加入是否需调整服药时间或护胃方案的问诊要点。"
                         )
                     )
                 }
 
                 state.copy(
                     isGeneratingSbar = false,
+                    hasGeneratedScript = true,
                     sbarDossier = state.sbarDossier.copy(
-                        estimatedTotalSeconds = 25 + requests.size * 8,
-                        situationText = newSituation,
+                        estimatedTotalSeconds = 20 + selectedEvents.size * 6 + requests.size * 6,
+                        situationText = desensitizedPrompt,
                         assessmentItems = requests
                     )
                 )
@@ -913,6 +985,7 @@ class TelemetryViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 narrativeText = "",
+                hasGeneratedScript = false,
                 symptomTags = state.symptomTags.map { it.copy(isActive = false) }
             )
         }

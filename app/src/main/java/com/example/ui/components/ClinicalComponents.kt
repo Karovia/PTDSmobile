@@ -52,30 +52,7 @@ fun PulsingBeaconDot(
     pulseEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    if (!pulseEnabled) {
-        Box(
-            modifier = modifier
-                .size(size)
-                .background(color, CircleShape)
-        )
-        return
-    }
-    val infiniteTransition = rememberInfiniteTransition(label = "beacon_pulse")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.28f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "beacon_alpha"
-    )
-    Box(
-        modifier = modifier
-            .size(size)
-            .alpha(alpha)
-            .background(color, CircleShape)
-    )
+    // Intentionally empty: all blinking indicator dots removed for a clean UI
 }
 
 /**
@@ -1056,4 +1033,54 @@ fun ConsultationDossierIcon(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * Unified Monoline Clinical Dossier / Prompt Icon (replaces generic AI sparkle icons).
+ * Matches the app's crisp geometric monoline style.
+ */
+@Composable
+fun ClinicalRecordDossierIcon(
+    tint: Color = ClinicalSurfaceContainerLowest,
+    accentColor: Color = tint,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(18.dp)) {
+        val s = size.width / 24f
+        // Outer geometric dossier sheet frame
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(4f * s, 3f * s),
+            size = Size(16f * s, 18f * s),
+            cornerRadius = CornerRadius(3.2f * s, 3.2f * s),
+            style = Stroke(width = 2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // Top terminal prompt chevron '>' + line
+        val chevronPath = Path().apply {
+            moveTo(7.5f * s, 7.8f * s)
+            lineTo(10f * s, 9.8f * s)
+            lineTo(7.5f * s, 11.8f * s)
+        }
+        drawPath(
+            path = chevronPath,
+            color = accentColor,
+            style = Stroke(width = 2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(
+            color = tint,
+            start = Offset(12.2f * s, 9.8f * s),
+            end = Offset(16.5f * s, 9.8f * s),
+            strokeWidth = 2f * s,
+            cap = StrokeCap.Round
+        )
+        // Bottom structured record line
+        drawLine(
+            color = tint,
+            start = Offset(7.5f * s, 15.2f * s),
+            end = Offset(16.5f * s, 15.2f * s),
+            strokeWidth = 2f * s,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 

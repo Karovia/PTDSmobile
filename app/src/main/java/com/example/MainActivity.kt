@@ -60,12 +60,11 @@ fun ClinicalTelemetryApp(
                 TelemetryDetailScreen(
                     uiState = uiState,
                     onBack = viewModel::navigateBackToMain,
+                    onRemoveSelectedEvent = viewModel::removeSelectedTimelineEventInGenerator,
                     onToggleSymptomTag = viewModel::toggleSymptomTag,
                     onUpdateNarrative = viewModel::updateNarrativeText,
                     onGenerateSbar = viewModel::generateStructuredSbar,
-                    onToggleChecklistItem = viewModel::toggleChecklistItem,
                     onCopyAll = viewModel::triggerCopyFeedback,
-                    onCadenceDemo = viewModel::triggerCadenceDemo,
                     onReset = viewModel::resetConsultationInput
                 )
             }
@@ -79,7 +78,7 @@ fun ClinicalTelemetryApp(
                             selectedTab = uiState.selectedTab,
                             lastMainTab = uiState.lastMainTab,
                             onSelectTab = { tab -> viewModel.selectBottomTab(tab) },
-                            onOpenConsultationScript = viewModel::openTelemetryDetail
+                            onBackFromAddRecord = viewModel::navigateBackFromAddRecord
                         )
                     }
                 ) { innerPadding ->
@@ -93,7 +92,10 @@ fun ClinicalTelemetryApp(
                                 DiseaseCalendarScreen(
                                     uiState = uiState,
                                     onSelectDay = viewModel::selectCalendarDay,
-                                    onToggleTimelineEvent = viewModel::toggleTimelineEvent
+                                    onToggleTimelineEvent = viewModel::toggleTimelineEvent,
+                                    onLongPressTimelineEvent = viewModel::toggleTimelineEventSelection,
+                                    onSelectAllTimelineEvents = viewModel::selectAllTimelineEvents,
+                                    onClearTimelineSelection = viewModel::clearTimelineSelection
                                 )
                             }
 
@@ -137,7 +139,7 @@ fun ClinicalTelemetryApp(
                             }
                         }
 
-                        // Floating Capsule "添加记录" Button at the bottom
+                        // Floating Capsule Button at the bottom: "添加记录" or "生成病程记录" when timeline events are selected
                         AnimatedVisibility(
                             visible = uiState.selectedTab != BottomNavTab.ADD_RECORD,
                             enter = fadeIn() + slideInVertically { it },
@@ -145,7 +147,22 @@ fun ClinicalTelemetryApp(
                             modifier = Modifier.align(Alignment.BottomCenter)
                         ) {
                             FloatingAddRecordCapsuleButton(
-                                onClick = { viewModel.selectBottomTab(BottomNavTab.ADD_RECORD) }
+                                selectedTimelineCount = if (uiState.selectedTab == BottomNavTab.CALENDAR) {
+                                    uiState.selectedTimelineEventIds.size
+                                } else {
+                                    0
+                                },
+                                onGenerateTimelineRecord = viewModel::openTelemetryDetail,
+                                onClearTimelineSelection = viewModel::clearTimelineSelection,
+                                onSelectAddSubMode = { subMode ->
+                                    viewModel.selectBottomTab(BottomNavTab.ADD_RECORD, subMode)
+                                },
+                                onClick = {
+                                    viewModel.selectBottomTab(
+                                        BottomNavTab.ADD_RECORD,
+                                        AddRecordSubMode.SELECTION
+                                    )
+                                }
                             )
                         }
                     }

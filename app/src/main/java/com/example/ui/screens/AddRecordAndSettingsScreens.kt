@@ -2,12 +2,21 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -43,11 +52,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -83,6 +93,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -92,6 +103,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -105,6 +117,7 @@ import com.example.model.BiomarkerTelemetry
 import com.example.model.BottomNavTab
 import com.example.model.MedicationBoxPlan
 import com.example.model.ModularCardItem
+import com.example.ui.components.ClinicalRecordDossierIcon
 import com.example.ui.components.ConsultationDossierIcon
 import com.example.ui.components.DoctorOrderSyncIcon
 import com.example.ui.components.MedicationBlisterIcon
@@ -132,14 +145,13 @@ import com.example.viewmodel.TelemetryUiState
  * - "卡片墙" (BottomNavTab.CARD_SETTINGS)
  * Selected state: Black text (#1A1C1C) + rounded-caps underline underneath.
  * Unselected state: Grey text (#5E5E5E).
- * Right side: Circular Consultation Script (就诊话术) icon button.
  */
 @Composable
 fun ClinicalMainTopBar(
     selectedTab: BottomNavTab,
     lastMainTab: BottomNavTab,
     onSelectTab: (BottomNavTab) -> Unit,
-    onOpenConsultationScript: () -> Unit,
+    onBackFromAddRecord: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeTopTab = if (selectedTab == BottomNavTab.ADD_RECORD) lastMainTab else selectedTab
@@ -155,65 +167,52 @@ fun ClinicalMainTopBar(
                 .fillMaxWidth()
                 .height(62.dp)
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: Two Top Navigation Tabs ("病程日历" and "卡片墙")
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(26.dp)
-            ) {
-                TopNavUnderlineTab(
-                    label = stringResource(R.string.nav_calendar),
-                    isSelected = selectedTab != BottomNavTab.ADD_RECORD && activeTopTab == BottomNavTab.CALENDAR,
-                    onClick = { onSelectTab(BottomNavTab.CALENDAR) },
-                    testTag = "nav_tab_calendar"
-                )
-
-                TopNavUnderlineTab(
-                    label = stringResource(R.string.nav_card_settings),
-                    isSelected = selectedTab != BottomNavTab.ADD_RECORD && activeTopTab == BottomNavTab.CARD_SETTINGS,
-                    onClick = { onSelectTab(BottomNavTab.CARD_SETTINGS) },
-                    testTag = "nav_tab_card_settings"
-                )
-
-                if (selectedTab == BottomNavTab.ADD_RECORD) {
-                    Surface(
-                        shape = CircleShape,
-                        color = ClinicalSurfaceContainer
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 5.dp)
-                            Text(
-                                text = "添加记录中",
-                                style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                                color = ClinicalOnSurface
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Right: Circular Consultation Script Icon Button
-            Surface(
-                shape = CircleShape,
-                color = ClinicalSurfaceContainer,
-                border = BorderStroke(1.dp, ClinicalHairlineBorder.copy(alpha = 0.6f)),
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenConsultationScript)
-                    .testTag("btn_consultation_script")
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+            if (selectedTab == BottomNavTab.ADD_RECORD) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onBackFromAddRecord)
+                        .padding(vertical = 8.dp, horizontal = 4.dp)
+                        .testTag("submode_back_header"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ConsultationDossierIcon()
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回上一页",
+                        tint = ClinicalOnSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "返回上一页",
+                        style = ClinicalTextStyles.headlineSm.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = ClinicalOnSurface
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(26.dp)
+                ) {
+                    TopNavUnderlineTab(
+                        label = stringResource(R.string.nav_calendar),
+                        isSelected = activeTopTab == BottomNavTab.CALENDAR,
+                        onClick = { onSelectTab(BottomNavTab.CALENDAR) },
+                        testTag = "nav_tab_calendar"
+                    )
+
+                    TopNavUnderlineTab(
+                        label = stringResource(R.string.nav_card_settings),
+                        isSelected = activeTopTab == BottomNavTab.CARD_SETTINGS,
+                        onClick = { onSelectTab(BottomNavTab.CARD_SETTINGS) },
+                        testTag = "nav_tab_card_settings"
+                    )
                 }
             }
         }
@@ -284,18 +283,42 @@ private fun TopNavUnderlineTab(
 }
 
 /**
- * Floating Stadium/Capsule "添加记录" Button at the bottom of the screen.
- * Shape: flat top and bottom, semicircular left and right ends (RoundedCornerShape(percent = 50)).
+ * Symmetrical Floating Dock & Expandable Capsule Menu at the bottom center of the screen:
+ * - Strict 3-zone axial symmetry (equal 38.dp circular anchors on left & right, centered core text stack)
+ * - Grounded dual-layer machined pedestal base for visual stability and low center of gravity
+ * - Smooth spring-driven radial/vertical expansion menu for quick access to the 3 record modes
+ * - Selection mode (when timeline events are selected): symmetrically morphs into "生成病程记录"
  */
 @Composable
 fun FloatingAddRecordCapsuleButton(
     onClick: () -> Unit,
+    selectedTimelineCount: Int = 0,
+    onGenerateTimelineRecord: () -> Unit = {},
+    onClearTimelineSelection: () -> Unit = {},
+    onSelectAddSubMode: (AddRecordSubMode) -> Unit = { onClick() },
     modifier: Modifier = Modifier
 ) {
+    val isSelectionMode = selectedTimelineCount > 0
+    var isMenuExpanded by remember { mutableStateOf(false) }
+
+    // Automatically collapse the quick menu if timeline selection mode activates
+    LaunchedEffect(isSelectionMode) {
+        if (isSelectionMode && isMenuExpanded) {
+            isMenuExpanded = false
+        }
+    }
+
+    if (isMenuExpanded) {
+        BackHandler {
+            isMenuExpanded = false
+        }
+    }
+
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
+
+    val capsuleScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -303,79 +326,545 @@ fun FloatingAddRecordCapsuleButton(
         label = "floating_capsule_scale"
     )
 
+    val capsuleWidth by animateDpAsState(
+        targetValue = when {
+            isSelectionMode -> 312.dp
+            isMenuExpanded -> 304.dp
+            else -> 284.dp
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "floating_capsule_width"
+    )
+
+    val addIconRotation by animateFloatAsState(
+        targetValue = if (isMenuExpanded) 135f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "floating_capsule_icon_rotation"
+    )
+
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (isMenuExpanded) 180f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "floating_capsule_chevron_rotation"
+    )
+
+    val circleBg by animateColorAsState(
+        targetValue = when {
+            isSelectionMode -> ClinicalPrimaryContainer.copy(alpha = 0.22f)
+            isMenuExpanded -> ClinicalPrimaryContainer
+            else -> ClinicalSurface.copy(alpha = 0.12f)
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "symmetrical_circle_bg"
+    )
+
+    val circleBorderColor by animateColorAsState(
+        targetValue = when {
+            isSelectionMode -> ClinicalPrimaryContainer.copy(alpha = 0.80f)
+            isMenuExpanded -> ClinicalSurface.copy(alpha = 0.28f)
+            else -> ClinicalSurface.copy(alpha = 0.18f)
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "symmetrical_circle_border"
+    )
+
     Box(
-        modifier = modifier
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .fillMaxWidth()
-            .padding(horizontal = 28.dp, vertical = 14.dp),
-        contentAlignment = Alignment.Center
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Surface(
-            shape = RoundedCornerShape(percent = 50),
-            color = ClinicalOnSurface,
-            shadowElevation = 8.dp,
-            border = BorderStroke(1.dp, ClinicalSurface.copy(alpha = 0.16f)),
-            modifier = Modifier
-                .widthIn(min = 230.dp, max = 310.dp)
-                .fillMaxWidth(0.76f)
-                .height(54.dp)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                }
-                .clip(RoundedCornerShape(percent = 50))
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = onClick
-                )
-                .testTag("nav_tab_add_record")
+        // Smooth full-screen backdrop scrim when the floating menu is expanded
+        AnimatedVisibility(
+            visible = isMenuExpanded && !isSelectionMode,
+            enter = fadeIn(animationSpec = tween(durationMillis = 220)),
+            exit = fadeOut(animationSpec = tween(durationMillis = 180))
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 18.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .background(ClinicalOnSurface.copy(alpha = 0.30f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { isMenuExpanded = false }
+                    )
+                    .testTag("floating_menu_scrim")
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            // Symmetrical Expandable Floating Menu Tray (blooms from bottom center)
+            AnimatedVisibility(
+                visible = isMenuExpanded && !isSelectionMode,
+                enter = fadeIn(animationSpec = tween(durationMillis = 200)) +
+                    scaleIn(
+                        initialScale = 0.84f,
+                        transformOrigin = TransformOrigin(0.5f, 1f),
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) +
+                    expandVertically(
+                        expandFrom = Alignment.Bottom,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                exit = fadeOut(animationSpec = tween(durationMillis = 150)) +
+                    scaleOut(
+                        targetScale = 0.88f,
+                        transformOrigin = TransformOrigin(0.5f, 1f),
+                        animationSpec = tween(durationMillis = 160)
+                    ) +
+                    shrinkVertically(
+                        shrinkTowards = Alignment.Bottom,
+                        animationSpec = tween(durationMillis = 160)
+                    )
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                SymmetricalExpandedAddMenu(
+                    onSelectSubMode = { subMode ->
+                        isMenuExpanded = false
+                        onSelectAddSubMode(subMode)
+                    },
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+            }
+
+            // Symmetrical Dark Capsule (no outer white border)
+            Surface(
+                shape = RoundedCornerShape(percent = 50),
+                color = ClinicalOnSurface,
+                shadowElevation = 10.dp,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = when {
+                        isSelectionMode -> ClinicalPrimaryContainer.copy(alpha = 0.72f)
+                        isMenuExpanded -> ClinicalPrimaryContainer.copy(alpha = 0.55f)
+                        else -> ClinicalSurface.copy(alpha = 0.14f)
+                    }
+                ),
+                modifier = Modifier
+                    .width(capsuleWidth)
+                    .height(54.dp)
+                    .graphicsLayer {
+                        scaleX = capsuleScale
+                        scaleY = capsuleScale
+                    }
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = {
+                            if (isSelectionMode) {
+                                onGenerateTimelineRecord()
+                            } else {
+                                isMenuExpanded = !isMenuExpanded
+                            }
+                        }
+                    )
+                    .testTag(
+                        if (isSelectionMode) {
+                            "btn_generate_timeline_record"
+                        } else {
+                            "nav_tab_add_record"
+                        }
+                    )
+            ) {
+                // 3-Zone Axial Symmetry Box:
+                // Left 38.dp circle == Center locked at 50% axis == Right 38.dp circle
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp)
                 ) {
+                    // LEFT SYMMETRICAL ANCHOR (38.dp circle)
                     Box(
                         modifier = Modifier
-                            .size(30.dp)
-                            .background(ClinicalPrimaryContainer, CircleShape),
+                            .align(Alignment.CenterStart)
+                            .size(38.dp)
+                            .background(circleBg, CircleShape)
+                            .border(
+                                width = 1.dp,
+                                color = circleBorderColor,
+                                shape = CircleShape
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "添加记录",
-                            tint = ClinicalSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        if (isSelectionMode) {
+                            ClinicalRecordDossierIcon(
+                                tint = ClinicalSurface,
+                                accentColor = ClinicalPrimaryContainer,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = if (isMenuExpanded) "收起菜单" else "添加记录",
+                                tint = ClinicalSurface,
+                                modifier = Modifier
+                                    .size(19.dp)
+                                    .graphicsLayer {
+                                        rotationZ = addIconRotation
+                                    }
+                            )
+                        }
                     }
-                    Text(
-                        text = stringResource(R.string.nav_add_record),
-                        style = ClinicalTextStyles.bodyLg.copy(
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = ClinicalSurface
+
+                    // CENTER CORE: Locked strictly to Alignment.Center (horizontal midpoint)
+                    AnimatedContent(
+                        targetState = Triple(isSelectionMode, selectedTimelineCount, isMenuExpanded),
+                        transitionSpec = {
+                            (fadeIn(tween(180)) togetherWith fadeOut(tween(140)))
+                                .using(SizeTransform(clip = false))
+                        },
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 46.dp),
+                        label = "floating_capsule_center_content"
+                    ) { (selecting, count, expanded) ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = when {
+                                    selecting -> "生成病程记录"
+                                    expanded -> "收起录入菜单"
+                                    else -> stringResource(R.string.nav_add_record)
+                                },
+                                style = ClinicalTextStyles.bodyLg.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.3.sp
+                                ),
+                                color = ClinicalSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                // Left symmetrical micro-bar
+                                Box(
+                                    modifier = Modifier
+                                        .width(8.dp)
+                                        .height(2.dp)
+                                        .background(
+                                            color = ClinicalPrimaryContainer,
+                                            shape = RoundedCornerShape(percent = 50)
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = when {
+                                        selecting -> "已选 $count 项 · 生成话术"
+                                        expanded -> "选择上方模块直接进入"
+                                        else -> "扫药盒 · 化验单 · 病程"
+                                    },
+                                    style = ClinicalTextStyles.bodySm.copy(
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.2.sp
+                                    ),
+                                    color = if (selecting) {
+                                        ClinicalSurface.copy(alpha = 0.92f)
+                                    } else {
+                                        ClinicalSurface.copy(alpha = 0.72f)
+                                    },
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                // Right symmetrical micro-bar
+                                Box(
+                                    modifier = Modifier
+                                        .width(8.dp)
+                                        .height(2.dp)
+                                        .background(
+                                            color = ClinicalPrimaryContainer,
+                                            shape = RoundedCornerShape(percent = 50)
+                                        )
+                                )
+                            }
+                        }
+                    }
+
+                    // RIGHT SYMMETRICAL ANCHOR (38.dp circle, identical diameter & weight to Left Anchor)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(38.dp)
+                            .background(circleBg, CircleShape)
+                            .border(
+                                width = 1.dp,
+                                color = circleBorderColor,
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelectionMode) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "前往生成病程记录",
+                                tint = ClinicalSurface,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                contentDescription = if (isMenuExpanded) "收起" else "展开录入菜单",
+                                tint = ClinicalSurface,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .graphicsLayer {
+                                        rotationZ = chevronRotation
+                                    }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SymmetricalExpandedAddMenu(
+    onSelectSubMode: (AddRecordSubMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var playStagger by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        playStagger = true
+    }
+
+    val sideCardsProgress by animateFloatAsState(
+        targetValue = if (playStagger) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "side_cards_stagger"
+    )
+    val centerCardProgress by animateFloatAsState(
+        targetValue = if (playStagger) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "center_card_stagger"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = ClinicalSurfaceContainerLowest,
+        shadowElevation = 14.dp,
+        border = BorderStroke(1.dp, ClinicalHairlineBorder),
+        modifier = modifier
+            .widthIn(min = 296.dp, max = 352.dp)
+            .fillMaxWidth(0.92f)
+            .testTag("floating_expanded_add_menu")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Symmetrical Header with equal left/right hairline rules
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    thickness = 1.dp,
+                    color = ClinicalHairlineBorder
+                )
+                Text(
+                    text = "选择记录录入方式",
+                    style = ClinicalTextStyles.bodySm.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    ),
+                    color = ClinicalSecondary
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    thickness = 1.dp,
+                    color = ClinicalHairlineBorder
+                )
+            }
+
+            // 3 Equal-Width Symmetrical Cards (Left - Center - Right)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SymmetricalQuickActionTile(
+                    title = "扫描药盒",
+                    subtitle = "用法 / 医嘱",
+                    isCenterPrimary = false,
+                    onClick = { onSelectSubMode(AddRecordSubMode.SCAN_MEDICATION_BOX) },
+                    testTag = "quick_menu_scan_med_box",
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer {
+                            val s = 0.88f + 0.12f * sideCardsProgress
+                            scaleX = s
+                            scaleY = s
+                            translationY = (1f - sideCardsProgress) * 18f
+                            alpha = sideCardsProgress.coerceIn(0f, 1f)
+                        }
+                ) {
+                    MedicationBlisterIcon(
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(percent = 50),
-                    color = ClinicalSurface.copy(alpha = 0.14f)
+                SymmetricalQuickActionTile(
+                    title = "化验单识别",
+                    subtitle = "指标同步跑道",
+                    isCenterPrimary = true,
+                    onClick = { onSelectSubMode(AddRecordSubMode.PHOTO_OCR) },
+                    testTag = "quick_menu_lab_sheet",
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer {
+                            val s = 0.86f + 0.14f * centerCardProgress
+                            scaleX = s
+                            scaleY = s
+                            translationY = (1f - centerCardProgress) * 24f
+                            alpha = centerCardProgress.coerceIn(0f, 1f)
+                        }
                 ) {
-                    Text(
-                        text = "化验 / 扫药盒",
-                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
-                        color = ClinicalSurface.copy(alpha = 0.9f),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    ScanMatrixIcon(
+                        modifier = Modifier.size(22.dp)
                     )
                 }
+
+                SymmetricalQuickActionTile(
+                    title = "病程与医嘱",
+                    subtitle = "体征 / 查房",
+                    isCenterPrimary = false,
+                    onClick = { onSelectSubMode(AddRecordSubMode.MANUAL_TIMELINE) },
+                    testTag = "quick_menu_manual_record",
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer {
+                            val s = 0.88f + 0.12f * sideCardsProgress
+                            scaleX = s
+                            scaleY = s
+                            translationY = (1f - sideCardsProgress) * 18f
+                            alpha = sideCardsProgress.coerceIn(0f, 1f)
+                        }
+                ) {
+                    DoctorOrderSyncIcon(
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SymmetricalQuickActionTile(
+    title: String,
+    subtitle: String,
+    isCenterPrimary: Boolean,
+    onClick: () -> Unit,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    iconContent: @Composable () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (isCenterPrimary) ClinicalSurfaceContainer else ClinicalSurfaceContainerLow,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isCenterPrimary) {
+                ClinicalOnSurface.copy(alpha = 0.22f)
+            } else {
+                ClinicalHairlineBorder
+            }
+        ),
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(ClinicalSurfaceContainerLowest, CircleShape)
+                    .border(
+                        width = 1.dp,
+                        color = ClinicalHairlineBorder,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                iconContent()
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = ClinicalTextStyles.bodyLg.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = ClinicalOnSurface,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text(
+                    text = subtitle,
+                    style = ClinicalTextStyles.bodySm.copy(
+                        fontSize = 10.sp
+                    ),
+                    color = ClinicalSecondary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }
@@ -402,11 +891,7 @@ fun AddTelemetryRecordScreen(
     modifier: Modifier = Modifier
 ) {
     BackHandler {
-        if (subMode != AddRecordSubMode.SELECTION) {
-            onSelectSubMode(AddRecordSubMode.SELECTION)
-        } else {
-            onNavigateBack()
-        }
+        onNavigateBack()
     }
 
     Box(
@@ -433,14 +918,14 @@ fun AddTelemetryRecordScreen(
                 AddRecordSubMode.PHOTO_OCR -> {
                     PhotoOcrRecognitionView(
                         currentBiomarkers = currentBiomarkers,
-                        onBackToSelection = { onSelectSubMode(AddRecordSubMode.SELECTION) },
+                        onBackToSelection = onNavigateBack,
                         onSyncToCalendar = onSyncRecognizedIndicators
                     )
                 }
 
                 AddRecordSubMode.SCAN_MEDICATION_BOX -> {
                     ScanMedicationBoxView(
-                        onBackToSelection = { onSelectSubMode(AddRecordSubMode.SELECTION) },
+                        onBackToSelection = onNavigateBack,
                         onSaveScannedBox = onAddScannedMedicationBox,
                         onSyncDoctorOrderOnly = onSyncMedicationsFromDoctorOrder
                     )
@@ -448,7 +933,7 @@ fun AddTelemetryRecordScreen(
 
                 AddRecordSubMode.MANUAL_TIMELINE -> {
                     ManualTimelineEntryView(
-                        onBackToSelection = { onSelectSubMode(AddRecordSubMode.SELECTION) },
+                        onBackToSelection = onNavigateBack,
                         onSaveToTimeline = onAddManualTimelineRecord
                     )
                 }
@@ -473,13 +958,6 @@ private fun AddRecordModeSelectionView(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            SubModeBackHeader(
-                modeBadge = "共 3 种录入方式",
-                title = "返回上一页",
-                onBack = onBack
-            )
-        }
 
         // Option 1: 扫描药盒与用法用量（含医嘱自动同步）
         item {
@@ -578,8 +1056,6 @@ private fun EntryOptionCard(
                         color = ClinicalSecondary
                     )
                 }
-
-                PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 6.dp)
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -709,13 +1185,6 @@ private fun ScanMedicationBoxView(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            SubModeBackHeader(
-                modeBadge = "返回上一步",
-                title = "扫描药盒与用法用量",
-                onBack = onBackToSelection
-            )
-        }
 
         // 1. Medicine Box Barcode & Package Viewfinder Card
         item {
@@ -996,7 +1465,6 @@ private fun ScanMedicationBoxView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 7.dp)
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
                                     text = "生成用法用量标签",
@@ -1166,10 +1634,10 @@ private fun ScanMedicationBoxView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                            ClinicalRecordDossierIcon(
+                                tint = ClinicalSurface,
+                                accentColor = ClinicalSurface,
+                                modifier = Modifier.size(17.dp)
                             )
                             Text(
                                 text = "按医嘱自动生成全部吃药卡片",
@@ -1250,13 +1718,6 @@ private fun PhotoOcrRecognitionView(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            SubModeBackHeader(
-                modeBadge = "返回上一步",
-                title = "拍照识别化验单",
-                onBack = onBackToSelection
-            )
-        }
 
         // Camera / Viewfinder Card
         item {
@@ -1516,16 +1977,10 @@ private fun PhotoOcrRecognitionView(
                             .fillMaxWidth()
                             .testTag("btn_sync_ocr_metrics")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 8.dp)
-                            Text(
-                                text = "同步识别指标至病程日历",
-                                style = ClinicalTextStyles.bodyLg
-                            )
-                        }
+                        Text(
+                            text = "同步识别指标至病程日历",
+                            style = ClinicalTextStyles.bodyLg
+                        )
                     }
                 }
             }
@@ -1552,24 +2007,11 @@ private fun RecognizedMetricRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .background(
-                            if (isAbnormal) ClinicalPrimaryContainer else ClinicalOnSurface,
-                            CircleShape
-                        )
-                )
-                Text(
-                    text = name,
-                    style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium),
-                    color = ClinicalOnSurface
-                )
-            }
+            Text(
+                text = name,
+                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium),
+                color = ClinicalOnSurface
+            )
             Text(
                 text = unit,
                 style = ClinicalTextStyles.bodySm,
@@ -1625,13 +2067,6 @@ private fun ManualTimelineEntryView(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            SubModeBackHeader(
-                modeBadge = "返回上一步",
-                title = "手动添加病程与医嘱",
-                onBack = onBackToSelection
-            )
-        }
 
         item {
             Surface(
@@ -1739,18 +2174,12 @@ private fun ManualTimelineEntryView(
                             border = BorderStroke(1.dp, ClinicalPrimaryContainer.copy(alpha = 0.35f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 6.dp)
-                                Text(
-                                    text = "已检测到医嘱内含处方用药：保存后将自动同步生成用法用量与吃药卡片",
-                                    style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
-                                    color = ClinicalOnSurface
-                                )
-                            }
+                            Text(
+                                text = "已检测到医嘱内含处方用药：保存后将自动同步生成用法用量与吃药卡片",
+                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
+                                color = ClinicalOnSurface,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
                         }
                     }
 
@@ -1768,16 +2197,10 @@ private fun ManualTimelineEntryView(
                             .fillMaxWidth()
                             .testTag("save_manual_timeline_btn")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 8.dp)
-                            Text(
-                                text = if (hasMedicationInOrder) "保存记录并自动同步医嘱用药" else "添加到病程日历下方记录",
-                                style = ClinicalTextStyles.bodyLg
-                            )
-                        }
+                        Text(
+                            text = if (hasMedicationInOrder) "保存记录并自动同步医嘱用药" else "添加到病程日历下方记录",
+                            style = ClinicalTextStyles.bodyLg
+                        )
                     }
                 }
             }
@@ -1907,18 +2330,12 @@ fun CardSettingsScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PulsingBeaconDot(color = ClinicalPrimaryContainer, size = 7.dp)
-                            Text(
-                                text = uiState.bannerMessage,
-                                style = ClinicalTextStyles.bodySm,
-                                color = ClinicalSurface
-                            )
-                        }
+                        Text(
+                            text = uiState.bannerMessage,
+                            style = ClinicalTextStyles.bodySm,
+                            color = ClinicalSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
                     }
                 }
             }
@@ -2305,26 +2722,14 @@ private fun StackedMedicationCardItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .background(
-                                    if (plan.isAutoSyncedFromOrder) ClinicalPrimaryContainer else ClinicalOnSurface,
-                                    CircleShape
-                                )
-                        )
-                        Text(
-                            text = plan.drugName,
-                            style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold),
-                            color = ClinicalSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Text(
+                        text = plan.drugName,
+                        style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold),
+                        color = ClinicalSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
 
                     Surface(
                         shape = CircleShape,
