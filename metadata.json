@@ -1,0 +1,6 @@
+{
+  "name": "DT-OS 病程日历",
+  "description": "Industrial clinical telemetry and disease timeline monitor with concentric biomarker tracks and SBAR consultation dossier generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
