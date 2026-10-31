@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -125,6 +126,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -133,6 +135,7 @@ import com.example.model.AddRecordSubMode
 import com.example.model.BiomarkerTelemetry
 import com.example.model.BottomNavTab
 import com.example.model.MedicationBoxPlan
+import com.example.model.MedicationOrderPrefill
 import com.example.model.ModularCardItem
 import com.example.ui.components.ClinicalRecordDossierIcon
 import com.example.ui.components.ConsultationDossierIcon
@@ -1064,12 +1067,15 @@ private fun TopNavUnderlineTab(
 fun FloatingAddRecordCapsuleButton(
     onClick: () -> Unit,
     selectedTimelineCount: Int = 0,
+    selectedSingleEventHasRemark: Boolean = false,
+    onEditTimelineRemark: () -> Unit = {},
     onGenerateTimelineRecord: () -> Unit = {},
     onClearTimelineSelection: () -> Unit = {},
     onSelectAddSubMode: (AddRecordSubMode) -> Unit = { onClick() },
     modifier: Modifier = Modifier
 ) {
     val isSelectionMode = selectedTimelineCount > 0
+    val isSingleTimelineSelected = selectedTimelineCount == 1
     var isMenuExpanded by remember { mutableStateOf(false) }
 
     // Automatically collapse the quick menu if timeline selection mode activates
@@ -1146,6 +1152,31 @@ fun FloatingAddRecordCapsuleButton(
         },
         animationSpec = tween(durationMillis = 220),
         label = "symmetrical_circle_border"
+    )
+
+    // Left circle dedicated colors when in selection mode:
+    // - 1 record selected: active remark button
+    // - >1 records selected: grayed out & disabled
+    val leftCircleBg by animateColorAsState(
+        targetValue = when {
+            isSelectionMode && isSingleTimelineSelected -> ClinicalSurface.copy(alpha = 0.16f)
+            isSelectionMode && !isSingleTimelineSelected -> ClinicalSurface.copy(alpha = 0.04f)
+            isMenuExpanded -> ClinicalPrimaryContainer
+            else -> ClinicalSurface.copy(alpha = 0.12f)
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "left_circle_bg"
+    )
+
+    val leftCircleBorderColor by animateColorAsState(
+        targetValue = when {
+            isSelectionMode && isSingleTimelineSelected -> ClinicalSurface.copy(alpha = 0.55f)
+            isSelectionMode && !isSingleTimelineSelected -> ClinicalSurface.copy(alpha = 0.10f)
+            isMenuExpanded -> ClinicalSurface.copy(alpha = 0.28f)
+            else -> ClinicalSurface.copy(alpha = 0.18f)
+        },
+        animationSpec = tween(durationMillis = 220),
+        label = "left_circle_border"
     )
 
     Box(
@@ -1266,22 +1297,51 @@ fun FloatingAddRecordCapsuleButton(
                         .padding(horizontal = 8.dp)
                 ) {
                     // LEFT SYMMETRICAL ANCHOR (38.dp circle)
+                    // In selection mode:
+                    // - 1 item selected: supports adding/editing remark (onEditTimelineRemark)
+                    // - >1 items selected: grayed out & disabled (absorbs click with no effect)
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .size(38.dp)
-                            .background(circleBg, CircleShape)
+                            .clip(CircleShape)
+                            .background(leftCircleBg, CircleShape)
                             .border(
                                 width = 1.dp,
-                                color = circleBorderColor,
+                                color = leftCircleBorderColor,
                                 shape = CircleShape
-                            ),
+                            )
+                            .then(
+                                if (isSelectionMode) {
+                                    Modifier.clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {
+                                            if (isSingleTimelineSelected) {
+                                                onEditTimelineRemark()
+                                            }
+                                            // When multiple items are selected (> 1), do nothing (no-op)
+                                        }
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .testTag("btn_edit_timeline_remark"),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isSelectionMode) {
                             ClinicalRecordDossierIcon(
-                                tint = ClinicalSurface,
-                                accentColor = ClinicalPrimaryContainer,
+                                tint = if (isSingleTimelineSelected) {
+                                    ClinicalSurface
+                                } else {
+                                    ClinicalSurface.copy(alpha = 0.24f)
+                                },
+                                accentColor = if (isSingleTimelineSelected) {
+                                    ClinicalPrimaryContainer
+                                } else {
+                                    ClinicalSurface.copy(alpha = 0.18f)
+                                },
                                 modifier = Modifier.size(17.dp)
                             )
                         } else {
@@ -1348,7 +1408,11 @@ fun FloatingAddRecordCapsuleButton(
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = when {
-                                        selecting -> "已选 $count 项 · 生成话术"
+                                        selecting && count == 1 -> {
+                                            val remarkAction = if (selectedSingleEventHasRemark) "修改备注" else "添加备注"
+                                            "左键$remarkAction · 右键生成记录"
+                                        }
+                                        selecting -> "已选 $count 项 · 多选仅支持生成记录"
                                         expanded -> "选择上方模块直接进入"
                                         else -> "扫药盒 · 化验单 · 病程"
                                     },
@@ -1386,12 +1450,25 @@ fun FloatingAddRecordCapsuleButton(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .size(38.dp)
+                            .clip(CircleShape)
                             .background(circleBg, CircleShape)
                             .border(
                                 width = 1.dp,
                                 color = circleBorderColor,
                                 shape = CircleShape
-                            ),
+                            )
+                            .then(
+                                if (isSelectionMode) {
+                                    Modifier.clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { onGenerateTimelineRecord() }
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .testTag("btn_right_generate_record"),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isSelectionMode) {
@@ -1646,6 +1723,9 @@ fun AddTelemetryRecordScreen(
     subMode: AddRecordSubMode,
     currentBiomarkers: BiomarkerTelemetry,
     medicationPlans: List<MedicationBoxPlan>,
+    pendingMedicationPrefill: MedicationOrderPrefill? = null,
+    detectedOrderPrefills: List<MedicationOrderPrefill> = emptyList(),
+    onSelectDetectedOrderPrefill: (MedicationOrderPrefill) -> Unit = {},
     onSelectSubMode: (AddRecordSubMode) -> Unit,
     onNavigateBack: () -> Unit,
     onSyncRecognizedIndicators: (glucose: Double, spo2: Int, skinTemp: Double) -> Unit,
@@ -1659,6 +1739,22 @@ fun AddTelemetryRecordScreen(
     ) -> Unit,
     onSyncMedicationsFromDoctorOrder: (orderText: String) -> Unit,
     onAddManualTimelineRecord: (timestampLabel: String, descriptionText: String, doctorNoteText: String) -> Unit,
+    onSyncUploadedFileToTimeline: (
+        fileName: String,
+        sourceTag: String,
+        timestampLabel: String,
+        summaryDescription: String,
+        doctorOrderText: String,
+        remarkText: String
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onConfirmMedicationOrderAndJumpToScanBox: (
+        selectedPrefill: MedicationOrderPrefill,
+        allDetectedPrefills: List<MedicationOrderPrefill>,
+        alsoSyncToTimeline: Boolean,
+        fileName: String,
+        sourceTag: String,
+        summaryDescription: String
+    ) -> Unit = { _, _, _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     BackHandler {
@@ -1700,13 +1796,18 @@ fun AddTelemetryRecordScreen(
                 AddRecordSubMode.MANUAL_TIMELINE -> {
                     ManualTimelineEntryView(
                         onBackToSelection = onNavigateBack,
-                        onSaveToTimeline = onAddManualTimelineRecord
+                        onSaveToTimeline = onAddManualTimelineRecord,
+                        onSyncUploadedFileToTimeline = onSyncUploadedFileToTimeline,
+                        onConfirmMedicationOrderAndJumpToScanBox = onConfirmMedicationOrderAndJumpToScanBox
                     )
                 }
 
                 AddRecordSubMode.SCAN_MEDICATION_BOX,
                 AddRecordSubMode.SELECTION -> {
                     ScanMedicationBoxView(
+                        pendingMedicationPrefill = pendingMedicationPrefill,
+                        detectedOrderPrefills = detectedOrderPrefills,
+                        onSelectDetectedOrderPrefill = onSelectDetectedOrderPrefill,
                         onBackToSelection = onNavigateBack,
                         onSaveScannedBox = onAddScannedMedicationBox,
                         onSyncDoctorOrderOnly = onSyncMedicationsFromDoctorOrder
@@ -1886,9 +1987,14 @@ private data class MedicineBoxPreset(
 
 /**
  * Streamlined Medicine Box Scanner + Usage/Dosage Configuration.
+ * Supports automatic pre-filling of drug name (e.g., 叶酸片), specification, dosing frequency,
+ * dose count, and timing when jumping from a confirmed medication order in 病程与医嘱.
  */
 @Composable
 private fun ScanMedicationBoxView(
+    pendingMedicationPrefill: MedicationOrderPrefill? = null,
+    detectedOrderPrefills: List<MedicationOrderPrefill> = emptyList(),
+    onSelectDetectedOrderPrefill: (MedicationOrderPrefill) -> Unit = {},
     onBackToSelection: () -> Unit,
     onSaveScannedBox: (
         drugName: String,
@@ -1903,19 +2009,19 @@ private fun ScanMedicationBoxView(
     val presets = remember {
         listOf(
             MedicineBoxPreset(
-                shortTag = "美卓乐",
-                drugName = "甲泼尼龙片 (美卓乐)",
-                specification = "4mg × 30片/盒",
-                frequencyCount = 1,
-                doseCount = "4",
-                timing = "早餐后温水送服"
-            ),
-            MedicineBoxPreset(
                 shortTag = "叶酸片",
                 drugName = "叶酸片",
                 specification = "5mg × 30片/盒",
                 frequencyCount = 1,
                 doseCount = "1",
+                timing = "早餐后温水送服"
+            ),
+            MedicineBoxPreset(
+                shortTag = "美卓乐",
+                drugName = "甲泼尼龙片 (美卓乐)",
+                specification = "4mg × 30片/盒",
+                frequencyCount = 1,
+                doseCount = "4",
                 timing = "早餐后温水送服"
             ),
             MedicineBoxPreset(
@@ -1940,14 +2046,44 @@ private fun ScanMedicationBoxView(
     val frequencyNumbers = remember { listOf(1, 2, 3, 4, 5, 6) }
     val presetDoseNumbers = remember { listOf("0.5", "1", "2", "3", "4") }
 
+    val initialDrugName = pendingMedicationPrefill?.drugName ?: presets[0].drugName
+    val initialSpec = pendingMedicationPrefill?.specification ?: presets[0].specification
+    val initialFreq = pendingMedicationPrefill?.frequencyCount ?: presets[0].frequencyCount
+    val initialDose = pendingMedicationPrefill?.doseCount ?: presets[0].doseCount
+    val initialTiming = pendingMedicationPrefill?.timing ?: presets[0].timing
+
     var hasScannedBox by remember { mutableStateOf(true) }
-    var drugNameInput by remember { mutableStateOf(presets[1].drugName) }
-    var specInput by remember { mutableStateOf(presets[1].specification) }
-    var selectedFrequencyCount by remember { mutableIntStateOf(presets[1].frequencyCount) }
-    var selectedDoseValue by remember { mutableStateOf(presets[1].doseCount) }
-    var isCustomDoseSelected by remember { mutableStateOf(false) }
-    var customDoseInput by remember { mutableStateOf("1.5") }
-    var timingInput by remember { mutableStateOf(presets[1].timing) }
+    var drugNameInput by remember { mutableStateOf(initialDrugName) }
+    var specInput by remember { mutableStateOf(initialSpec) }
+    var selectedFrequencyCount by remember { mutableIntStateOf(initialFreq) }
+    var selectedDoseValue by remember {
+        mutableStateOf(if (initialDose in presetDoseNumbers) initialDose else "1")
+    }
+    var isCustomDoseSelected by remember {
+        mutableStateOf(initialDose !in presetDoseNumbers)
+    }
+    var customDoseInput by remember {
+        mutableStateOf(if (initialDose !in presetDoseNumbers) initialDose else "1.5")
+    }
+    var timingInput by remember { mutableStateOf(initialTiming) }
+
+    // Automatically apply prefill whenever jumping from a confirmed medication order
+    LaunchedEffect(pendingMedicationPrefill) {
+        pendingMedicationPrefill?.let { prefill ->
+            hasScannedBox = true
+            drugNameInput = prefill.drugName
+            specInput = prefill.specification
+            selectedFrequencyCount = prefill.frequencyCount.coerceIn(1, 6)
+            if (prefill.doseCount in presetDoseNumbers) {
+                isCustomDoseSelected = false
+                selectedDoseValue = prefill.doseCount
+            } else {
+                isCustomDoseSelected = true
+                customDoseInput = prefill.doseCount
+            }
+            timingInput = prefill.timing
+        }
+    }
 
     val resolvedFrequencyLabel = "每日${selectedFrequencyCount}次"
     val resolvedDoseNumber = if (isCustomDoseSelected) {
@@ -2000,7 +2136,13 @@ private fun ScanMedicationBoxView(
                             color = if (hasScannedBox) ClinicalPrimary.copy(alpha = 0.1f) else ClinicalSurfaceContainer
                         ) {
                             Text(
-                                text = if (hasScannedBox) "已识别" else "待对焦",
+                                text = if (pendingMedicationPrefill != null) {
+                                    "医嘱已同步"
+                                } else if (hasScannedBox) {
+                                    "已识别"
+                                } else {
+                                    "待对焦"
+                                },
                                 style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                                 color = if (hasScannedBox) ClinicalPrimary else ClinicalSecondary,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
@@ -2128,13 +2270,22 @@ private fun ScanMedicationBoxView(
             }
         }
 
-        // 2. Streamlined Drug Info & Usage Card
+        // 2. Streamlined Drug Info & Usage Card (Lower Card — Auto-presents & pre-fills from confirmed doctor order)
         item {
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = ClinicalSurfaceContainerLowest,
-                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
-                modifier = Modifier.fillMaxWidth()
+                border = BorderStroke(
+                    width = if (pendingMedicationPrefill != null) 1.5.dp else 1.dp,
+                    color = if (pendingMedicationPrefill != null) {
+                        ClinicalPrimaryContainer.copy(alpha = 0.55f)
+                    } else {
+                        ClinicalSurfaceContainer
+                    }
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("scan_med_box_lower_card")
             ) {
                 Column(
                     modifier = Modifier
@@ -2142,6 +2293,88 @@ private fun ScanMedicationBoxView(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Auto-filled Medication Order Banner (condensed)
+                    if (pendingMedicationPrefill != null) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = ClinicalPrimary.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, ClinicalPrimaryContainer.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("prefilled_medication_order_banner")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        PulsingBeaconDot()
+                                        Text(
+                                            text = "医嘱已填入 · $drugNameInput",
+                                            style = ClinicalTextStyles.bodySm.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = ClinicalPrimary
+                                            )
+                                        )
+                                    }
+                                    Text(
+                                        text = "每日${selectedFrequencyCount}次 · 每次${resolvedDoseNumber}片",
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = ClinicalOnSurface
+                                    )
+                                }
+
+                                if (detectedOrderPrefills.size > 1) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        detectedOrderPrefills.forEach { orderMed ->
+                                            val isCurrentMed = orderMed.drugName == drugNameInput
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = if (isCurrentMed) ClinicalOnSurface else ClinicalSurfaceContainerLowest,
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    if (isCurrentMed) ClinicalOnSurface else ClinicalHairlineBorder
+                                                ),
+                                                modifier = Modifier
+                                                    .clip(CircleShape)
+                                                    .clickable { onSelectDetectedOrderPrefill(orderMed) }
+                                            ) {
+                                                Text(
+                                                    text = orderMed.drugName.substringBefore(" "),
+                                                    style = ClinicalTextStyles.bodySm.copy(
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isCurrentMed) FontWeight.Bold else FontWeight.Medium
+                                                    ),
+                                                    color = if (isCurrentMed) ClinicalSurface else ClinicalOnSurface,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Drug Name & Specification (Retained as requested)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2288,7 +2521,7 @@ private fun ScanMedicationBoxView(
                             OutlinedTextField(
                                 value = customDoseInput,
                                 onValueChange = { customDoseInput = it },
-                                label = { Text("手动输入单次片数", style = ClinicalTextStyles.bodySm) },
+                                label = { Text("手动片数", style = ClinicalTextStyles.bodySm) },
                                 placeholder = { Text("如：1.5", style = ClinicalTextStyles.bodySm) },
                                 suffix = {
                                     Text(
@@ -2317,7 +2550,7 @@ private fun ScanMedicationBoxView(
                     // 3. 服用时间和方式: Manual text field directly
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            text = "服用时间和方式",
+                            text = "服用方式",
                             style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
                             color = ClinicalOnSurface
                         )
@@ -2354,7 +2587,7 @@ private fun ScanMedicationBoxView(
                                 resolvedFrequencyLabel,
                                 resolvedDoseLabel,
                                 timingInput.trim().ifEmpty { "餐后温水送服" },
-                                ""
+                                pendingMedicationPrefill?.sourceOrderExcerpt ?: ""
                             )
                         },
                         shape = RoundedCornerShape(percent = 50),
@@ -2556,18 +2789,83 @@ private fun pixelDigitMatrix(ch: Char): List<String> = when (ch) {
     )
 }
 
+/**
+ * Simple minimalist icon for PDF / file upload (upward arrow inside document tray).
+ */
+@Composable
+private fun SimpleFileUploadIcon(
+    tint: Color = ClinicalOnSurface,
+    modifier: Modifier = Modifier.size(18.dp)
+) {
+    Canvas(modifier = modifier) {
+        val s = size.width / 24f
+        val stroke = Stroke(width = 2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+        // Document / Tray base
+        val trayPath = Path().apply {
+            moveTo(4.5f * s, 14.5f * s)
+            lineTo(4.5f * s, 18.5f * s)
+            quadraticTo(4.5f * s, 20f * s, 6f * s, 20f * s)
+            lineTo(18f * s, 20f * s)
+            quadraticTo(19.5f * s, 20f * s, 19.5f * s, 18.5f * s)
+            lineTo(19.5f * s, 14.5f * s)
+        }
+        drawPath(path = trayPath, color = tint, style = stroke)
+
+        // Upward arrow shaft
+        drawLine(
+            color = tint,
+            start = Offset(12f * s, 15f * s),
+            end = Offset(12f * s, 4.5f * s),
+            strokeWidth = 2f * s,
+            cap = StrokeCap.Round
+        )
+
+        // Upward arrow head
+        val arrowPath = Path().apply {
+            moveTo(8f * s, 8.5f * s)
+            lineTo(12f * s, 4.5f * s)
+            lineTo(16f * s, 8.5f * s)
+        }
+        drawPath(path = arrowPath, color = tint, style = stroke)
+    }
+}
+
 @Composable
 private fun PhotoOcrRecognitionView(
     currentBiomarkers: BiomarkerTelemetry,
     onBackToSelection: () -> Unit,
     onSyncToCalendar: (glucose: Double, spo2: Int, skinTemp: Double) -> Unit
 ) {
+    val pdfPresets = remember {
+        listOf(
+            "血常规与生化报告_1012.pdf",
+            "免疫复查检验单_1012.pdf"
+        )
+    }
+    var pdfPresetIdx by remember { mutableIntStateOf(0) }
     var hasCapturedSheet by remember { mutableStateOf(false) }
+    var isPdfRecognized by remember { mutableStateOf(false) }
+    var recognizedPdfName by remember { mutableStateOf(pdfPresets[0]) }
+
     var glucoseText by remember { mutableStateOf(currentBiomarkers.glucoseValue.toString()) }
     var spo2Text by remember { mutableStateOf(currentBiomarkers.spo2Value.toString()) }
     var skinTempText by remember { mutableStateOf(currentBiomarkers.skinTempValue.toString()) }
     var wbcText by remember { mutableStateOf("11.8") }
     var esrText by remember { mutableStateOf("38") }
+    var showMoreMetrics by remember { mutableStateOf(false) }
+
+    val labPdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val pickedName = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null }
+                ?: pdfPresets[pdfPresetIdx]
+            recognizedPdfName = pickedName
+        }
+        hasCapturedSheet = true
+        isPdfRecognized = true
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2575,10 +2873,9 @@ private fun PhotoOcrRecognitionView(
             .fillMaxSize()
             .testTag("photo_ocr_view_list"),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-
-        // Camera / Viewfinder Card
+        // 1. Unified Split Box Card: Left = 拍照 | Vertical Divider | Right = 上传
         item {
             Surface(
                 shape = RoundedCornerShape(24.dp),
@@ -2590,53 +2887,26 @@ private fun PhotoOcrRecognitionView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "化验单取景框",
-                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
-                            color = ClinicalOnSurface
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = if (hasCapturedSheet) ClinicalPrimary.copy(alpha = 0.1f) else ClinicalSurfaceContainer
-                        ) {
-                            Text(
-                                text = if (hasCapturedSheet) "已取景预览" else "等待拍摄",
-                                style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
-                                color = if (hasCapturedSheet) ClinicalPrimary else ClinicalSecondary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    // Recessed Viewfinder Box with Hardware Reticle Corners
+                    // Split Recessed Box: Left = Camera (拍照), Center = Vertical Line, Right = Upload (上传)
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = ClinicalSurfaceContainerLow,
                         border = BorderStroke(1.dp, ClinicalSurfaceContainer),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(190.dp)
+                            .height(124.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .clickable { hasCapturedSheet = true }
                     ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             Canvas(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(18.dp)
+                                    .padding(14.dp)
                             ) {
-                                val len = 22.dp.toPx()
-                                val stroke = 2.5.dp.toPx()
+                                val len = 16.dp.toPx()
+                                val stroke = 2.dp.toPx()
                                 val w = size.width
                                 val h = size.height
                                 val bracketColor = if (hasCapturedSheet) ClinicalPrimaryContainer else ClinicalOnSurface
@@ -2651,97 +2921,134 @@ private fun PhotoOcrRecognitionView(
                                 drawLine(bracketColor, Offset(w, h), Offset(w, h - len), stroke, StrokeCap.Round)
                             }
 
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(horizontal = 24.dp)
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Left Half: 拍照
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
-                                        .background(ClinicalSurfaceContainerLowest, CircleShape),
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                                        .clickable {
+                                            hasCapturedSheet = true
+                                            isPdfRecognized = false
+                                        }
+                                        .testTag("btn_trigger_camera_ocr"),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = if (hasCapturedSheet) Icons.Filled.CheckCircle else Icons.Filled.CameraAlt,
-                                        contentDescription = null,
-                                        tint = if (hasCapturedSheet) ClinicalPrimaryContainer else ClinicalOnSurface,
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(ClinicalSurfaceContainerLowest, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (hasCapturedSheet && !isPdfRecognized) {
+                                                    Icons.Filled.CheckCircle
+                                                } else {
+                                                    Icons.Filled.CameraAlt
+                                                },
+                                                contentDescription = "拍照",
+                                                tint = if (hasCapturedSheet && !isPdfRecognized) {
+                                                    ClinicalPrimaryContainer
+                                                } else {
+                                                    ClinicalOnSurface
+                                                },
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = if (hasCapturedSheet && !isPdfRecognized) "已拍照" else "拍照",
+                                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
+                                            color = ClinicalOnSurface
+                                        )
+                                        Text(
+                                            text = if (hasCapturedSheet && !isPdfRecognized) "已提取指标" else "拍化验单",
+                                            style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                            color = ClinicalSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
-                                Text(
-                                    text = if (hasCapturedSheet) {
-                                        "化验单图像已载入 • 已定位 5 项核心指标"
-                                    } else {
-                                        "对准纸质化验单拍摄，自动提取各项检验指标"
-                                    },
-                                    style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium),
-                                    color = ClinicalOnSurface
+
+                                // Center Vertical Divider Line
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .fillMaxHeight(0.58f)
+                                        .background(ClinicalHairlineBorder)
                                 )
-                                Text(
-                                    text = "支持血常规 / 生化全项 / 铁蛋白 / 血沉报告单",
-                                    style = ClinicalTextStyles.bodySm,
-                                    color = ClinicalSecondary
-                                )
+
+                                // Right Half: 上传
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp))
+                                        .clickable {
+                                            recognizedPdfName = pdfPresets[pdfPresetIdx]
+                                            pdfPresetIdx = (pdfPresetIdx + 1) % pdfPresets.size
+                                            hasCapturedSheet = true
+                                            isPdfRecognized = true
+                                            glucoseText = "6.1"
+                                            spo2Text = "98"
+                                            skinTempText = "36.7"
+                                            wbcText = "8.4"
+                                            esrText = "16"
+                                            labPdfLauncher.launch("application/pdf")
+                                        }
+                                        .testTag("btn_upload_lab_pdf"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .background(
+                                                    if (isPdfRecognized) ClinicalOnSurface else ClinicalSurfaceContainerLowest,
+                                                    CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SimpleFileUploadIcon(
+                                                tint = if (isPdfRecognized) ClinicalSurface else ClinicalOnSurface,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = if (isPdfRecognized) "已上传" else "上传",
+                                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
+                                            color = ClinicalOnSurface
+                                        )
+                                        Text(
+                                            text = if (isPdfRecognized) recognizedPdfName else "PDF / 报告",
+                                            style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                            color = ClinicalSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = { hasCapturedSheet = true },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ClinicalInverseSurface,
-                                contentColor = ClinicalInverseOnSurface
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("btn_trigger_camera_ocr")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CameraAlt,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "拍照识别",
-                                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium)
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = { hasCapturedSheet = true },
-                            shape = CircleShape,
-                            border = BorderStroke(1.dp, ClinicalHairlineBorder),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = ClinicalOnSurface
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("btn_trigger_gallery_ocr")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.PhotoLibrary,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "相册导入",
-                                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium)
-                            )
                         }
                     }
                 }
             }
         }
 
-        // Recognized Indicators Preview Card
+        // 2. Condensed Indicators Card (Secondary rows hidden behind toggle)
         item {
             Surface(
                 shape = RoundedCornerShape(24.dp),
@@ -2753,7 +3060,7 @@ private fun PhotoOcrRecognitionView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2761,20 +3068,33 @@ private fun PhotoOcrRecognitionView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "识别指标同步预览",
+                            text = "核心指标",
                             style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
                             color = ClinicalOnSurface
                         )
-                        Text(
-                            text = "可微调核对",
-                            style = ClinicalTextStyles.bodySm,
-                            color = ClinicalSecondary
-                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = ClinicalSurfaceContainerLow,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { showMoreMetrics = !showMoreMetrics }
+                                .testTag("btn_toggle_more_lab_metrics")
+                        ) {
+                            Text(
+                                text = if (showMoreMetrics) "收起扩展项" else "+ 血常规项 (2)",
+                                style = ClinicalTextStyles.bodySm.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = ClinicalSecondary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
 
                     RecognizedMetricRow(
-                        name = "血液内含糖量 (mmol/L)",
-                        unit = "危险阈值 >${currentBiomarkers.glucoseLimit}",
+                        name = "血糖",
+                        unit = "mmol/L",
                         value = glucoseText,
                         onValueChange = { glucoseText = it },
                         isAbnormal = (glucoseText.toDoubleOrNull() ?: 0.0) > currentBiomarkers.glucoseLimit
@@ -2782,8 +3102,8 @@ private fun PhotoOcrRecognitionView(
                     HorizontalDivider(color = ClinicalSurfaceContainer)
 
                     RecognizedMetricRow(
-                        name = "血氧浓度 (%)",
-                        unit = "报警阈值 <${currentBiomarkers.spo2MinLimit}%",
+                        name = "血氧",
+                        unit = "%",
                         value = spo2Text,
                         onValueChange = { spo2Text = it },
                         isAbnormal = (spo2Text.toIntOrNull() ?: 100) < currentBiomarkers.spo2MinLimit
@@ -2792,32 +3112,35 @@ private fun PhotoOcrRecognitionView(
 
                     val parsedSkinTemp = skinTempText.toDoubleOrNull() ?: currentBiomarkers.skinTempValue
                     RecognizedMetricRow(
-                        name = "皮肤温度 (°C)",
-                        unit = "正常范围 ${currentBiomarkers.skinTempLowLimit}-${currentBiomarkers.skinTempHighLimit}°C",
+                        name = "皮温",
+                        unit = "°C",
                         value = skinTempText,
                         onValueChange = { skinTempText = it },
                         isAbnormal = parsedSkinTemp > currentBiomarkers.skinTempHighLimit || parsedSkinTemp < currentBiomarkers.skinTempLowLimit
                     )
-                    HorizontalDivider(color = ClinicalSurfaceContainer)
 
-                    RecognizedMetricRow(
-                        name = "白细胞计数 (10^9/L)",
-                        unit = "参考范围 3.5-9.5",
-                        value = wbcText,
-                        onValueChange = { wbcText = it },
-                        isAbnormal = (wbcText.toDoubleOrNull() ?: 0.0) > 9.5
-                    )
-                    HorizontalDivider(color = ClinicalSurfaceContainer)
+                    AnimatedVisibility(visible = showMoreMetrics) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HorizontalDivider(color = ClinicalSurfaceContainer)
+                            RecognizedMetricRow(
+                                name = "白细胞",
+                                unit = "10⁹/L",
+                                value = wbcText,
+                                onValueChange = { wbcText = it },
+                                isAbnormal = (wbcText.toDoubleOrNull() ?: 0.0) > 9.5
+                            )
+                            HorizontalDivider(color = ClinicalSurfaceContainer)
+                            RecognizedMetricRow(
+                                name = "血沉",
+                                unit = "mm/h",
+                                value = esrText,
+                                onValueChange = { esrText = it },
+                                isAbnormal = (esrText.toIntOrNull() ?: 0) > 20
+                            )
+                        }
+                    }
 
-                    RecognizedMetricRow(
-                        name = "红细胞沉降率 (mm/h)",
-                        unit = "参考范围 0-20",
-                        value = esrText,
-                        onValueChange = { esrText = it },
-                        isAbnormal = (esrText.toIntOrNull() ?: 0) > 20
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
                     Button(
                         onClick = {
@@ -2837,7 +3160,7 @@ private fun PhotoOcrRecognitionView(
                             .testTag("btn_sync_ocr_metrics")
                     ) {
                         Text(
-                            text = "同步识别指标至病程日历",
+                            text = "同步指标",
                             style = ClinicalTextStyles.bodyLg
                         )
                     }
@@ -2862,13 +3185,14 @@ private fun RecognizedMetricRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f)
         ) {
             Text(
                 text = name,
-                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Medium),
+                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold),
                 color = ClinicalOnSurface
             )
             Text(
@@ -2893,7 +3217,7 @@ private fun RecognizedMetricRow(
                 focusedContainerColor = ClinicalSurfaceContainerLow,
                 unfocusedContainerColor = ClinicalSurfaceContainerLow
             ),
-            modifier = Modifier.width(108.dp)
+            modifier = Modifier.width(100.dp)
         )
     }
 }
@@ -2904,19 +3228,19 @@ private enum class ClinicalDocScanType(
     val viewfinderPrompt: String
 ) {
     DOCTOR_ORDER(
-        shortTitle = "扫医嘱",
-        badgeLabel = "自动提取医嘱",
-        viewfinderPrompt = "对准查房或门诊医嘱单拍摄，回传 Mac 自动提取医嘱条目"
+        shortTitle = "医嘱",
+        badgeLabel = "提取医嘱",
+        viewfinderPrompt = "拍摄医嘱 · 右上角支持 PDF"
     ),
     PRESCRIPTION_SLIP(
-        shortTitle = "扫开药单",
-        badgeLabel = "提取开药单",
-        viewfinderPrompt = "对准门诊处方/开药单拍摄，回传 Mac 提取药品规格与剂量"
+        shortTitle = "开药单",
+        badgeLabel = "提取处方",
+        viewfinderPrompt = "拍摄处方 · 右上角支持 PDF"
     ),
     MEDICAL_RECORD(
-        shortTitle = "扫病历",
-        badgeLabel = "自动提取病历",
-        viewfinderPrompt = "对准门诊或住院病历拍摄，回传 Mac 提取体征数值与病程描述"
+        shortTitle = "病历",
+        badgeLabel = "提取病历",
+        viewfinderPrompt = "拍摄病历 · 右上角支持 PDF"
     )
 }
 
@@ -2928,633 +3252,828 @@ private data class ExtractedFieldItem(
     val isConfirmed: Boolean
 )
 
+private data class ClinicalUploadedFilePreset(
+    val fileName: String,
+    val fileTypeBadge: String,
+    val defaultSourceCategory: String,
+    val summaryDescription: String,
+    val orderExcerpt: String,
+    val detectedMedications: List<MedicationOrderPrefill>
+)
+
 @Composable
 private fun ManualTimelineEntryView(
     onBackToSelection: () -> Unit,
-    onSaveToTimeline: (timestampLabel: String, descriptionText: String, doctorNoteText: String) -> Unit
+    onSaveToTimeline: (timestampLabel: String, descriptionText: String, doctorNoteText: String) -> Unit,
+    onSyncUploadedFileToTimeline: (
+        fileName: String,
+        sourceTag: String,
+        timestampLabel: String,
+        summaryDescription: String,
+        doctorOrderText: String,
+        remarkText: String
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onConfirmMedicationOrderAndJumpToScanBox: (
+        selectedPrefill: MedicationOrderPrefill,
+        allDetectedPrefills: List<MedicationOrderPrefill>,
+        alsoSyncToTimeline: Boolean,
+        fileName: String,
+        sourceTag: String,
+        summaryDescription: String
+    ) -> Unit = { _, _, _, _, _, _ -> }
 ) {
-    var activeScanType by remember { mutableStateOf(ClinicalDocScanType.DOCTOR_ORDER) }
-    // Extraction confirmation sub-UI only triggers after the user scans a document
-    var triggeredScanType by remember { mutableStateOf<ClinicalDocScanType?>(null) }
-    var filledFromScanTag by remember { mutableStateOf<String?>(null) }
+    val filePresets = remember {
+        listOf(
+            ClinicalUploadedFilePreset(
+                fileName = "门诊复诊医嘱单_叶酸片.pdf",
+                fileTypeBadge = "PDF 医嘱",
+                defaultSourceCategory = "医嘱",
+                summaryDescription = "病情稳定缓解，体温36.8°C，调整叶酸与护胃方案。",
+                orderExcerpt = "叶酸片 5mg 每日1次（早餐后）；甲泼尼龙片 16mg/d；碳酸钙D3 1片/晚。",
+                detectedMedications = listOf(
+                    MedicationOrderPrefill(
+                        drugName = "叶酸片",
+                        specification = "5mg × 30片/盒",
+                        frequencyCount = 1,
+                        doseCount = "1",
+                        timing = "早餐后温水送服",
+                        sourceOrderExcerpt = "加服叶酸片 5mg 每日1次（早餐后温水送服）",
+                        sourceTag = "医嘱"
+                    ),
+                    MedicationOrderPrefill(
+                        drugName = "甲泼尼龙片 (美卓乐)",
+                        specification = "4mg × 30片/盒",
+                        frequencyCount = 1,
+                        doseCount = "4",
+                        timing = "早餐后温水送服",
+                        sourceOrderExcerpt = "继续甲泼尼龙片 16mg/d（每次4片）早餐后口服",
+                        sourceTag = "医嘱"
+                    ),
+                    MedicationOrderPrefill(
+                        drugName = "碳酸钙D3片 (钙尔奇)",
+                        specification = "600mg × 60片/瓶",
+                        frequencyCount = 1,
+                        doseCount = "1",
+                        timing = "晚餐后或睡前咀嚼",
+                        sourceOrderExcerpt = "每晚碳酸钙D3片 600mg 1片口服",
+                        sourceTag = "医嘱"
+                    )
+                )
+            ),
+            ClinicalUploadedFilePreset(
+                fileName = "门诊电子处方单_1012.pdf",
+                fileTypeBadge = "PDF 处方",
+                defaultSourceCategory = "开药单",
+                summaryDescription = "电子处方笺：叶酸片及激素抗炎联合用药。",
+                orderExcerpt = "叶酸片 5mg×30片（每日1次，每次1片）；甲泼尼龙片 4mg×30片（每日1次，每次4片）。",
+                detectedMedications = listOf(
+                    MedicationOrderPrefill(
+                        drugName = "叶酸片",
+                        specification = "5mg × 30片/盒",
+                        frequencyCount = 1,
+                        doseCount = "1",
+                        timing = "早餐后温水送服",
+                        sourceOrderExcerpt = "处方开药：叶酸片 5mg×30片（每日1次，每次1片）",
+                        sourceTag = "开药单"
+                    ),
+                    MedicationOrderPrefill(
+                        drugName = "甲泼尼龙片 (美卓乐)",
+                        specification = "4mg × 30片/盒",
+                        frequencyCount = 1,
+                        doseCount = "4",
+                        timing = "早餐后温水送服",
+                        sourceOrderExcerpt = "处方开药：甲泼尼龙片 4mg×30片（每日1次，每次4片）",
+                        sourceTag = "开药单"
+                    )
+                )
+            ),
+            ClinicalUploadedFilePreset(
+                fileName = "住院查房病程记录_1012.pdf",
+                fileTypeBadge = "PDF 病历",
+                defaultSourceCategory = "病历",
+                summaryDescription = "晨间查房：皮疹消退，维持原抗炎与叶酸补充医嘱。",
+                orderExcerpt = "维持叶酸片每日1次每次1片口服，3日后复查血沉。",
+                detectedMedications = listOf(
+                    MedicationOrderPrefill(
+                        drugName = "叶酸片",
+                        specification = "5mg × 30片/盒",
+                        frequencyCount = 1,
+                        doseCount = "1",
+                        timing = "早餐后温水送服",
+                        sourceOrderExcerpt = "查房医嘱：维持叶酸片每日1次每次1片口服",
+                        sourceTag = "病历"
+                    )
+                )
+            )
+        )
+    }
 
-    // 1. Sub-UI State: 医嘱提取项 (Doctor's Order)
+    var presetCursor by remember { mutableIntStateOf(0) }
+    var uploadedFileName by remember { mutableStateOf(filePresets[0].fileName) }
+    var uploadedFileBadge by remember { mutableStateOf(filePresets[0].fileTypeBadge) }
+    var selectedSourceCategory by remember { mutableStateOf(ClinicalDocScanType.DOCTOR_ORDER.shortTitle) }
+    var fileRemarkInput by remember { mutableStateOf("") }
+    var extractedSummaryText by remember { mutableStateOf(filePresets[0].summaryDescription) }
+    var extractedOrderExcerpt by remember { mutableStateOf(filePresets[0].orderExcerpt) }
+    var detectedMedications by remember { mutableStateOf(filePresets[0].detectedMedications) }
+    var selectedMedPrefillIndex by remember { mutableIntStateOf(0) }
+
+    // Dedicated sub-page state for managing recognized medication demands ("去管理" -> separate page)
+    var showMedicationManagePage by remember { mutableStateOf(false) }
+    // Collapsible toggle to hide optional remarks by default
+    var showSourceDetails by remember { mutableStateOf(false) }
+    var hasSyncedFileBanner by remember { mutableStateOf<String?>(null) }
+
+    val combinedSourceTag = remember(selectedSourceCategory, fileRemarkInput) {
+        val remark = fileRemarkInput.trim()
+        if (remark.isNotEmpty()) "$selectedSourceCategory · $remark" else selectedSourceCategory
+    }
+
+    val currentSelectedMedPrefill = remember(detectedMedications, selectedMedPrefillIndex, combinedSourceTag) {
+        val base = detectedMedications.getOrNull(selectedMedPrefillIndex)
+            ?: detectedMedications.firstOrNull()
+            ?: MedicationOrderPrefill(
+                drugName = "叶酸片",
+                specification = "5mg × 30片/盒",
+                frequencyCount = 1,
+                doseCount = "1",
+                timing = "早餐后温水送服",
+                sourceOrderExcerpt = extractedOrderExcerpt,
+                sourceTag = combinedSourceTag
+            )
+        base.copy(sourceTag = combinedSourceTag)
+    }
+
+    // System file picker for PDF / document recognition
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val tail = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null }
+                ?: filePresets[presetCursor].fileName
+            uploadedFileName = tail
+            uploadedFileBadge = "PDF 已识别"
+        }
+    }
+
+    var activeScanType by remember { mutableStateOf(ClinicalDocScanType.DOCTOR_ORDER) }
+    var triggeredScanType by remember { mutableStateOf<ClinicalDocScanType?>(null) }
+
+    // 1. Sub-UI State: 医嘱提取项
     var orderItems by remember {
         mutableStateOf(
             listOf(
                 ExtractedFieldItem(
                     id = "order_1",
-                    label = "主药剂量医嘱",
-                    subHint = "激素口服方案",
-                    value = "继续甲泼尼龙片 16mg/d 早餐后口服",
+                    label = "叶酸补充",
+                    subHint = "每日1次",
+                    value = "叶酸片 5mg 每日1次（每次1片，早餐后）",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "order_2",
-                    label = "联合辅助用药",
-                    subHint = "护胃与补钙方案",
-                    value = "加服叶酸片每日1片（早餐后），每晚碳酸钙D3片1片",
+                    label = "主药剂量",
+                    subHint = "每日1次",
+                    value = "甲泼尼龙片 16mg/d 早餐后口服",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "order_3",
-                    label = "监测与随访医嘱",
-                    subHint = "体温与复查要求",
-                    value = "每日监测午后体温，3天后复查血常规与CRP",
+                    label = "随访复查",
+                    subHint = "监测要求",
+                    value = "监测午后体温，3天后复查血常规",
                     isConfirmed = false
                 )
             )
         )
     }
 
-    // 2. Sub-UI State: 开药单提取项 (Prescription Slip)
+    // 2. Sub-UI State: 开药单提取项
     var prescriptionItems by remember {
         mutableStateOf(
             listOf(
                 ExtractedFieldItem(
                     id = "rx_1",
-                    label = "甲泼尼龙片 (美卓乐)",
-                    subHint = "规格 4mg×30片/盒 · 单次剂量与频次",
-                    value = "每次4片 (16mg) · 每日1次早餐后口服",
+                    label = "叶酸片",
+                    subHint = "5mg×30片",
+                    value = "每次1片 · 每日1次早餐后",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "rx_2",
-                    label = "叶酸片",
-                    subHint = "规格 5mg×30片/盒 · 单次剂量与频次",
-                    value = "每次1片 (5mg) · 每日1次早餐后口服",
+                    label = "甲泼尼龙片",
+                    subHint = "4mg×30片",
+                    value = "每次4片 · 每日1次早餐后",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "rx_3",
-                    label = "碳酸钙D3片 (钙尔奇)",
-                    subHint = "规格 600mg×60片/瓶 · 单次剂量与频次",
-                    value = "每次1片 (600mg) · 每晚1次口服",
+                    label = "碳酸钙D3片",
+                    subHint = "600mg×60片",
+                    value = "每次1片 · 每晚1次",
                     isConfirmed = false
                 )
             )
         )
     }
 
-    // 3. Sub-UI State: 病历提取项 (Medical Record)
+    // 3. Sub-UI State: 病历提取项
     var medicalRecordItems by remember {
         mutableStateOf(
             listOf(
                 ExtractedFieldItem(
-                    id = "mr_time",
-                    label = "病历记录时间",
-                    subHint = "门诊/查房时间戳",
-                    value = "10-12 今天 15:20",
-                    isConfirmed = false
-                ),
-                ExtractedFieldItem(
                     id = "mr_vitals",
-                    label = "体征实测数值",
-                    subHint = "体温 / 心率 / 血氧",
-                    value = "体温 36.8°C，心率 76次/分，血氧 98%",
+                    label = "体征实测",
+                    subHint = "体温 / 血氧",
+                    value = "体温 36.8°C，心率 76，血氧 98%",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "mr_symptoms",
-                    label = "主诉与查体记录",
-                    subHint = "关节与皮疹体征",
-                    value = "午后无发热，双膝关节无肿胀压痛，皮疹已消退",
+                    label = "查体记录",
+                    subHint = "关节 / 皮疹",
+                    value = "无发热，双膝无压痛，皮疹消退",
                     isConfirmed = false
                 ),
                 ExtractedFieldItem(
                     id = "mr_assessment",
-                    label = "病程评估结论",
-                    subHint = "阶段性病情判断",
-                    value = "病情处于稳定缓解期，维持当前抗炎减量节奏",
+                    label = "评估结论",
+                    subHint = "病情阶段",
+                    value = "稳定缓解期，维持当前方案",
                     isConfirmed = false
                 )
             )
         )
     }
 
-    // Form fields below
-    var timestampInput by remember { mutableStateOf("10-12 今天 14:30") }
-    var descriptionInput by remember {
-        mutableStateOf("午后复测体温37.2°C，双膝关节无明显压痛，按计划完成今日口服药。")
-    }
-    var doctorNoteInput by remember {
-        mutableStateOf("继续甲泼尼龙片 16mg/d 口服，加服叶酸片每日1片（早餐后），每晚碳酸钙D3片1片")
-    }
-
-    fun applyConfirmedDoctorOrderToForm(items: List<ExtractedFieldItem>) {
+    fun applyConfirmedDoctorOrder(items: List<ExtractedFieldItem>) {
         val confirmed = items.filter { it.isConfirmed }
         if (confirmed.isNotEmpty()) {
-            doctorNoteInput = confirmed.joinToString("；") { it.value.trim() }
-            filledFromScanTag = "已从 Mac 医嘱扫描确认填入 (${confirmed.size} 项)"
+            extractedOrderExcerpt = confirmed.joinToString("；") { it.value.trim() }
+            selectedSourceCategory = ClinicalDocScanType.DOCTOR_ORDER.shortTitle
+            selectedMedPrefillIndex = 0
+            triggeredScanType = null
+            showMedicationManagePage = true
         }
     }
 
-    fun applyConfirmedPrescriptionToForm(items: List<ExtractedFieldItem>) {
+    fun applyConfirmedPrescription(items: List<ExtractedFieldItem>) {
         val confirmed = items.filter { it.isConfirmed }
         if (confirmed.isNotEmpty()) {
-            doctorNoteInput = "开药单处方：" + confirmed.joinToString("；") { "${it.label} ${it.value.trim()}" }
-            filledFromScanTag = "已从 Mac 开药单确认填入 (${confirmed.size} 项药品)"
+            extractedOrderExcerpt = confirmed.joinToString("；") { "${it.label} ${it.value.trim()}" }
+            selectedSourceCategory = ClinicalDocScanType.PRESCRIPTION_SLIP.shortTitle
+            selectedMedPrefillIndex = 0
+            triggeredScanType = null
+            showMedicationManagePage = true
         }
     }
 
-    fun applyConfirmedMedicalRecordToForm(items: List<ExtractedFieldItem>) {
+    fun applyConfirmedMedicalRecord(items: List<ExtractedFieldItem>) {
         val confirmed = items.filter { it.isConfirmed }
         if (confirmed.isNotEmpty()) {
-            confirmed.find { it.id == "mr_time" }?.let { timestampInput = it.value.trim() }
-            val descParts = confirmed.filter { it.id != "mr_time" }.map { it.value.trim() }
-            if (descParts.isNotEmpty()) {
-                descriptionInput = descParts.joinToString("；") + "。"
+            extractedSummaryText = confirmed.joinToString("；") { it.value.trim() } + "。"
+            selectedSourceCategory = ClinicalDocScanType.MEDICAL_RECORD.shortTitle
+            triggeredScanType = null
+            hasSyncedFileBanner = "病历已提取，点击「同步至病程」即可保存"
+        }
+    }
+
+    BackHandler(enabled = showMedicationManagePage) {
+        showMedicationManagePage = false
+    }
+
+    AnimatedContent(
+        targetState = showMedicationManagePage,
+        transitionSpec = {
+            if (targetState) {
+                (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { it / 5 })
+                    .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(200)) { -it / 5 })
+            } else {
+                (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { -it / 5 })
+                    .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(200)) { it / 5 })
             }
-            filledFromScanTag = "已从 Mac 病历扫描确认填入 (${confirmed.size} 项)"
-        }
-    }
-
-    val hasMedicationInOrder = remember(doctorNoteInput) {
-        val text = doctorNoteInput.trim()
-        text.contains("片") || text.contains("粒") || text.contains("mg") ||
-            text.contains("口服") || text.contains("甲泼尼龙") || text.contains("美卓乐") ||
-            text.contains("护胃") || text.contains("钙") || text.contains("叶酸")
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .widthIn(max = 600.dp)
-            .fillMaxSize()
-            .testTag("manual_timeline_view_list"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // 1. Document Scanner Card (扫医嘱 / 扫开药单 / 扫病历 + Mac Relay Status)
-        item {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = ClinicalSurfaceContainerLowest,
-                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
-                modifier = Modifier.fillMaxWidth()
+        },
+        label = "timeline_to_med_manage_split"
+    ) { isManagePage ->
+        if (isManagePage) {
+            MedicationDemandManagePage(
+                fileName = uploadedFileName,
+                sourceTag = combinedSourceTag,
+                orderExcerpt = extractedOrderExcerpt,
+                detectedMedications = detectedMedications,
+                selectedIndex = selectedMedPrefillIndex,
+                onSelectIndex = { selectedMedPrefillIndex = it },
+                onBack = { showMedicationManagePage = false },
+                onConfirmAndJumpToScanBox = {
+                    showMedicationManagePage = false
+                    onConfirmMedicationOrderAndJumpToScanBox(
+                        currentSelectedMedPrefill,
+                        detectedMedications.map { it.copy(sourceTag = combinedSourceTag) },
+                        true,
+                        uploadedFileName,
+                        combinedSourceTag,
+                        extractedSummaryText
+                    )
+                }
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxSize()
+                    .testTag("manual_timeline_view_list"),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            ScanMatrixIcon()
-                            Text(
-                                text = "扫描病历 / 医嘱 / 开药单",
-                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
-                                color = ClinicalOnSurface
-                            )
-                        }
-
-                        // Mac Relay Status Pill
-                        Surface(
-                            shape = CircleShape,
-                            color = if (triggeredScanType != null) {
-                                ClinicalPrimary.copy(alpha = 0.1f)
-                            } else {
-                                ClinicalSurfaceContainerLow
-                            },
-                            border = BorderStroke(
-                                1.dp,
-                                if (triggeredScanType != null) {
-                                    ClinicalPrimaryContainer.copy(alpha = 0.35f)
-                                } else {
-                                    ClinicalSurfaceContainer
-                                }
-                            )
-                        ) {
-                            Text(
-                                text = if (triggeredScanType != null) {
-                                    "Mac 已处理回传"
-                                } else {
-                                    "回传 Mac 协同解析"
-                                },
-                                style = ClinicalTextStyles.bodySm.copy(
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = if (triggeredScanType != null) ClinicalPrimary else ClinicalSecondary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    // 3 Scan Mode Selector Pills: 扫医嘱 | 扫开药单 | 扫病历
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ClinicalDocScanType.entries.forEach { scanType ->
-                            val isSelected = activeScanType == scanType
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainer
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        activeScanType = scanType
-                                        if (triggeredScanType != null) {
-                                            triggeredScanType = scanType
-                                        }
-                                    }
-                                    .testTag("doc_scan_tab_${scanType.name.lowercase()}")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                ) {
-                                    Text(
-                                        text = scanType.shortTitle,
-                                        style = ClinicalTextStyles.bodySm.copy(
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        ),
-                                        color = if (isSelected) ClinicalSurface else ClinicalOnSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Recessed Viewfinder Box
+                // 1. Unified Clean Scanner + Simple Icon PDF Upload + Source Tagging Card
+                item {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = ClinicalSurfaceContainerLow,
+                        shape = RoundedCornerShape(24.dp),
+                        color = ClinicalSurfaceContainerLowest,
                         border = BorderStroke(1.dp, ClinicalSurfaceContainer),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(126.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { triggeredScanType = activeScanType }
-                            .testTag("doc_scan_viewfinder")
+                            .testTag("upload_file_and_source_card")
                     ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Canvas(
+                            // 1. Split Box: Left = 拍照 | Center Vertical Line | Right = 上传
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = ClinicalSurfaceContainerLow,
+                                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(14.dp)
+                                    .fillMaxWidth()
+                                    .height(122.dp)
+                                    .clip(RoundedCornerShape(16.dp))
                             ) {
-                                val len = 18.dp.toPx()
-                                val stroke = 2.2.dp.toPx()
-                                val w = size.width
-                                val h = size.height
-                                val isTriggered = triggeredScanType == activeScanType
-                                val bracketColor = if (isTriggered) ClinicalPrimaryContainer else ClinicalOnSurface
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    Canvas(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(14.dp)
+                                    ) {
+                                        val len = 16.dp.toPx()
+                                        val stroke = 2.dp.toPx()
+                                        val w = size.width
+                                        val h = size.height
+                                        val isTriggered = triggeredScanType == activeScanType
+                                        val bracketColor = if (isTriggered) ClinicalPrimaryContainer else ClinicalOnSurface
 
-                                drawLine(bracketColor, Offset(0f, 0f), Offset(len, 0f), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(0f, 0f), Offset(0f, len), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(w, 0f), Offset(w - len, 0f), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(w, 0f), Offset(w, len), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(0f, h), Offset(len, h), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(0f, h), Offset(0f, h - len), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(w, h), Offset(w - len, h), stroke, StrokeCap.Round)
-                                drawLine(bracketColor, Offset(w, h), Offset(w, h - len), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(0f, 0f), Offset(len, 0f), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(0f, 0f), Offset(0f, len), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(w, 0f), Offset(w - len, 0f), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(w, 0f), Offset(w, len), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(0f, h), Offset(len, h), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(0f, h), Offset(0f, h - len), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(w, h), Offset(w - len, h), stroke, StrokeCap.Round)
+                                        drawLine(bracketColor, Offset(w, h), Offset(w, h - len), stroke, StrokeCap.Round)
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Left Side: 拍照
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                                                .clickable { triggeredScanType = activeScanType }
+                                                .testTag("doc_scan_viewfinder"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                                modifier = Modifier.padding(horizontal = 12.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .background(ClinicalSurfaceContainerLowest, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (triggeredScanType != null) {
+                                                            Icons.Filled.CheckCircle
+                                                        } else {
+                                                            Icons.Filled.CameraAlt
+                                                        },
+                                                        contentDescription = "拍照",
+                                                        tint = if (triggeredScanType != null) {
+                                                            ClinicalPrimaryContainer
+                                                        } else {
+                                                            ClinicalOnSurface
+                                                        },
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                Text(
+                                                    text = if (triggeredScanType != null) {
+                                                        "已拍${activeScanType.shortTitle}"
+                                                    } else {
+                                                        "拍照"
+                                                    },
+                                                    style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
+                                                    color = ClinicalOnSurface
+                                                )
+                                                Text(
+                                                    text = if (triggeredScanType != null) {
+                                                        "Mac已回传"
+                                                    } else {
+                                                        "拍摄${activeScanType.shortTitle}"
+                                                    },
+                                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                                    color = ClinicalSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        // Middle Vertical Divider Line
+                                        Box(
+                                            modifier = Modifier
+                                                .width(1.dp)
+                                                .fillMaxHeight(0.58f)
+                                                .background(ClinicalHairlineBorder)
+                                        )
+
+                                        // Right Side: 上传
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp))
+                                                .clickable {
+                                                    presetCursor = (presetCursor + 1) % filePresets.size
+                                                    val preset = filePresets[presetCursor]
+                                                    uploadedFileName = preset.fileName
+                                                    uploadedFileBadge = preset.fileTypeBadge
+                                                    extractedSummaryText = preset.summaryDescription
+                                                    extractedOrderExcerpt = preset.orderExcerpt
+                                                    detectedMedications = preset.detectedMedications
+                                                    selectedMedPrefillIndex = 0
+                                                    hasSyncedFileBanner = null
+                                                    filePickerLauncher.launch("application/pdf")
+                                                }
+                                                .testTag("btn_upload_clinical_file"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                                modifier = Modifier.padding(horizontal = 12.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .background(ClinicalSurfaceContainerLowest, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    SimpleFileUploadIcon(
+                                                        tint = ClinicalOnSurface,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "上传",
+                                                    style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
+                                                    color = ClinicalOnSurface
+                                                )
+                                                Text(
+                                                    text = uploadedFileName,
+                                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                                    color = ClinicalSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.padding(horizontal = 20.dp)
+                            // 2. Bottom Bar: Moved "医嘱", "开药单", "病历" here (deleted redundant "门诊医嘱", "住院查房", "门诊病历", "处方单") + "+ 备注" toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(ClinicalSurfaceContainerLowest, CircleShape),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(
-                                        imageVector = if (triggeredScanType == activeScanType) {
-                                            Icons.Filled.CheckCircle
-                                        } else {
-                                            Icons.Filled.CameraAlt
-                                        },
-                                        contentDescription = null,
-                                        tint = if (triggeredScanType == activeScanType) {
-                                            ClinicalPrimaryContainer
-                                        } else {
-                                            ClinicalOnSurface
-                                        },
-                                        modifier = Modifier.size(19.dp)
+                                    ClinicalDocScanType.entries.forEach { scanType ->
+                                        val isSelected = activeScanType == scanType
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainer
+                                            ),
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .clickable {
+                                                    activeScanType = scanType
+                                                    selectedSourceCategory = scanType.shortTitle
+                                                    if (triggeredScanType != null) {
+                                                        triggeredScanType = scanType
+                                                    }
+                                                }
+                                                .testTag("doc_scan_tab_${scanType.name.lowercase()}")
+                                        ) {
+                                            Text(
+                                                text = scanType.shortTitle,
+                                                style = ClinicalTextStyles.bodySm.copy(
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                ),
+                                                color = if (isSelected) ClinicalSurface else ClinicalOnSurface,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                // Toggle button to hide/reveal optional doctor, remark & summary
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (showSourceDetails) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { showSourceDetails = !showSourceDetails }
+                                        .testTag("btn_toggle_source_details")
+                                ) {
+                                    Text(
+                                        text = if (showSourceDetails) "收起" else "+ 备注",
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = if (showSourceDetails) ClinicalSurface else ClinicalSecondary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
                                 }
+                            }
+
+                            // Hidden by default: Only Remark input & Summary preview (no bound doctor source)
+                            AnimatedVisibility(visible = showSourceDetails) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = fileRemarkInput,
+                                        onValueChange = { fileRemarkInput = it },
+                                        label = { Text("备注", style = ClinicalTextStyles.bodySm) },
+                                        placeholder = {
+                                            Text(
+                                                "可自行备注医师、科室或说明",
+                                                style = ClinicalTextStyles.bodySm,
+                                                color = ClinicalSecondary
+                                            )
+                                        },
+                                        singleLine = true,
+                                        textStyle = ClinicalTextStyles.bodySm,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = ClinicalOnSurface,
+                                            unfocusedBorderColor = ClinicalHairlineBorder,
+                                            focusedContainerColor = ClinicalSurfaceContainerLow,
+                                            unfocusedContainerColor = ClinicalSurfaceContainerLow
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("input_file_remark")
+                                    )
+
+                                    Text(
+                                        text = "摘要：$extractedSummaryText",
+                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                        color = ClinicalSecondary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            if (hasSyncedFileBanner != null) {
                                 Text(
-                                    text = if (triggeredScanType == activeScanType) {
-                                        "已扫描【${activeScanType.shortTitle.removePrefix("扫")}】· Mac 已返回提取数据，请在下方核对确认"
-                                    } else {
-                                        activeScanType.viewfinderPrompt
-                                    },
+                                    text = hasSyncedFileBanner ?: "",
                                     style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
-                                    color = ClinicalOnSurface
+                                    color = ClinicalPrimary
                                 )
                             }
-                        }
-                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = { triggeredScanType = activeScanType },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ClinicalOnSurface,
-                                contentColor = ClinicalSurface
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("btn_trigger_doc_scan")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CameraAlt,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "扫描${activeScanType.shortTitle.removePrefix("扫")}（回传 Mac）",
-                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-
-                        if (triggeredScanType != null) {
-                            OutlinedButton(
-                                onClick = { triggeredScanType = null },
+                            // Primary Sync Button
+                            Button(
+                                onClick = {
+                                    onSyncUploadedFileToTimeline(
+                                        uploadedFileName,
+                                        combinedSourceTag,
+                                        "10-12 今天 15:20",
+                                        extractedSummaryText,
+                                        extractedOrderExcerpt,
+                                        fileRemarkInput
+                                    )
+                                },
                                 shape = CircleShape,
-                                border = BorderStroke(1.dp, ClinicalHairlineBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = ClinicalSecondary
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ClinicalOnSurface,
+                                    contentColor = ClinicalSurface
                                 ),
-                                modifier = Modifier.testTag("btn_close_extracted_sub_ui")
+                                contentPadding = PaddingValues(vertical = 13.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_sync_uploaded_file_to_timeline")
                             ) {
                                 Text(
-                                    text = "收起识别",
-                                    style = ClinicalTextStyles.bodySm
+                                    text = "同步至病程",
+                                    style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold)
                                 )
                             }
                         }
                     }
                 }
-            }
-        }
 
-        // 2. Conditional Extraction & Confirmation Sub-UIs (ONLY triggered after scanning!)
-        item {
-            AnimatedVisibility(
-                visible = triggeredScanType != null,
-                enter = fadeIn(tween(220)) + expandVertically(tween(240)),
-                exit = fadeOut(tween(180)) + shrinkVertically(tween(200))
-            ) {
-                val currentScan = triggeredScanType ?: activeScanType
-                AnimatedContent(
-                    targetState = currentScan,
-                    transitionSpec = {
-                        fadeIn(tween(200)).togetherWith(fadeOut(tween(160)))
-                    },
-                    label = "extracted_sub_ui_switch"
-                ) { scanMode ->
-                    when (scanMode) {
-                        ClinicalDocScanType.DOCTOR_ORDER -> {
-                            ExtractedConfirmationSubUiCard(
-                                subUiBadge = "医嘱提取子界面",
-                                title = "自动提取医嘱 · 待核对确认",
-                                macStatusText = "手机扫描 → Mac 端解析完成 → 已回传手机",
-                                items = orderItems,
-                                onUpdateItemValue = { id, newVal ->
-                                    orderItems = orderItems.map {
-                                        if (it.id == id) it.copy(value = newVal) else it
-                                    }
-                                },
-                                onToggleItemConfirm = { id ->
-                                    orderItems = orderItems.map {
-                                        if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
-                                    }
-                                },
-                                onConfirmAllAndFill = {
-                                    val allConfirmed = orderItems.map { it.copy(isConfirmed = true) }
-                                    orderItems = allConfirmed
-                                    applyConfirmedDoctorOrderToForm(allConfirmed)
-                                },
-                                onFillConfirmedToForm = {
-                                    applyConfirmedDoctorOrderToForm(orderItems)
-                                },
-                                applyButtonLabel = "将已确认医嘱添加到表单",
-                                testTagPrefix = "sub_ui_doctor_order"
-                            )
-                        }
+                // 2. Compact Navigation Entry Bar for Recognized Medication Demands -> Splits into Separate Page ("去管理")
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = ClinicalSurfaceContainerLowest,
+                        border = BorderStroke(1.2.dp, ClinicalPrimaryContainer.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { showMedicationManagePage = true }
+                            .testTag("med_demand_entry_bar")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                PulsingBeaconDot()
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "识别到 ${detectedMedications.size} 项用药需求",
+                                        style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Bold),
+                                        color = ClinicalOnSurface
+                                    )
+                                    Text(
+                                        text = "${currentSelectedMedPrefill.drugName} · 每日${currentSelectedMedPrefill.frequencyCount}次",
+                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                        color = ClinicalSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
 
-                        ClinicalDocScanType.PRESCRIPTION_SLIP -> {
-                            ExtractedConfirmationSubUiCard(
-                                subUiBadge = "开药单提取子界面",
-                                title = "自动提取开药单 · 待核对确认",
-                                macStatusText = "手机扫描 → Mac 端处方解析 → 已回传手机",
-                                items = prescriptionItems,
-                                onUpdateItemValue = { id, newVal ->
-                                    prescriptionItems = prescriptionItems.map {
-                                        if (it.id == id) it.copy(value = newVal) else it
-                                    }
-                                },
-                                onToggleItemConfirm = { id ->
-                                    prescriptionItems = prescriptionItems.map {
-                                        if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
-                                    }
-                                },
-                                onConfirmAllAndFill = {
-                                    val allConfirmed = prescriptionItems.map { it.copy(isConfirmed = true) }
-                                    prescriptionItems = allConfirmed
-                                    applyConfirmedPrescriptionToForm(allConfirmed)
-                                },
-                                onFillConfirmedToForm = {
-                                    applyConfirmedPrescriptionToForm(prescriptionItems)
-                                },
-                                applyButtonLabel = "将已确认开药单添加到表单",
-                                testTagPrefix = "sub_ui_prescription"
-                            )
-                        }
-
-                        ClinicalDocScanType.MEDICAL_RECORD -> {
-                            ExtractedConfirmationSubUiCard(
-                                subUiBadge = "病历提取子界面",
-                                title = "自动提取病历 · 待核对确认",
-                                macStatusText = "手机扫描 → Mac 端病历解析 → 已回传手机",
-                                items = medicalRecordItems,
-                                onUpdateItemValue = { id, newVal ->
-                                    medicalRecordItems = medicalRecordItems.map {
-                                        if (it.id == id) it.copy(value = newVal) else it
-                                    }
-                                },
-                                onToggleItemConfirm = { id ->
-                                    medicalRecordItems = medicalRecordItems.map {
-                                        if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
-                                    }
-                                },
-                                onConfirmAllAndFill = {
-                                    val allConfirmed = medicalRecordItems.map { it.copy(isConfirmed = true) }
-                                    medicalRecordItems = allConfirmed
-                                    applyConfirmedMedicalRecordToForm(allConfirmed)
-                                },
-                                onFillConfirmedToForm = {
-                                    applyConfirmedMedicalRecordToForm(medicalRecordItems)
-                                },
-                                applyButtonLabel = "将已确认病历添加到表单",
-                                testTagPrefix = "sub_ui_medical_record"
-                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = ClinicalOnSurface,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable { showMedicationManagePage = true }
+                                    .testTag("btn_open_med_order_popup")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        text = "去管理",
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = ClinicalSurface
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = ClinicalSurface,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        // 3. 病程与医嘱记录表单 Card
-        item {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = ClinicalSurfaceContainerLowest,
-                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                // 3. Conditional Extraction Sub-UI (Only shown when camera viewfinder is tapped)
+                item {
+                    AnimatedVisibility(
+                        visible = triggeredScanType != null,
+                        enter = fadeIn(tween(200)) + expandVertically(tween(220)),
+                        exit = fadeOut(tween(160)) + shrinkVertically(tween(180))
                     ) {
-                        Text(
-                            text = "病程与医嘱记录表单",
-                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
-                            color = ClinicalOnSurface
-                        )
-                        Text(
-                            text = filledFromScanTag ?: "支持扫描确认后填入",
-                            style = ClinicalTextStyles.bodySm,
-                            color = if (filledFromScanTag != null) ClinicalPrimary else ClinicalSecondary
-                        )
-                    }
+                        val currentScan = triggeredScanType ?: activeScanType
+                        when (currentScan) {
+                            ClinicalDocScanType.DOCTOR_ORDER -> {
+                                ExtractedConfirmationSubUiCard(
+                                    subUiBadge = "医嘱",
+                                    title = "核对提取项",
+                                    items = orderItems,
+                                    onUpdateItemValue = { id, newVal ->
+                                        orderItems = orderItems.map {
+                                            if (it.id == id) it.copy(value = newVal) else it
+                                        }
+                                    },
+                                    onToggleItemConfirm = { id ->
+                                        orderItems = orderItems.map {
+                                            if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
+                                        }
+                                    },
+                                    onConfirmAllAndFill = {
+                                        val allConfirmed = orderItems.map { it.copy(isConfirmed = true) }
+                                        orderItems = allConfirmed
+                                        applyConfirmedDoctorOrder(allConfirmed)
+                                    },
+                                    onFillConfirmedToForm = {
+                                        applyConfirmedDoctorOrder(orderItems)
+                                    },
+                                    onDismiss = { triggeredScanType = null },
+                                    applyButtonLabel = "确认并去管理用药",
+                                    testTagPrefix = "sub_ui_doctor_order"
+                                )
+                            }
 
-                    OutlinedTextField(
-                        value = timestampInput,
-                        onValueChange = { timestampInput = it },
-                        label = {
-                            Text(
-                                text = "记录时间",
-                                style = ClinicalTextStyles.bodySm
-                            )
-                        },
-                        singleLine = true,
-                        textStyle = ClinicalTextStyles.labelMonoLg,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ClinicalOnSurface,
-                            unfocusedBorderColor = ClinicalHairlineBorder,
-                            focusedContainerColor = ClinicalSurfaceContainerLow,
-                            unfocusedContainerColor = ClinicalSurfaceContainerLow
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("manual_timestamp_input")
-                    )
+                            ClinicalDocScanType.PRESCRIPTION_SLIP -> {
+                                ExtractedConfirmationSubUiCard(
+                                    subUiBadge = "开药单",
+                                    title = "核对处方项",
+                                    items = prescriptionItems,
+                                    onUpdateItemValue = { id, newVal ->
+                                        prescriptionItems = prescriptionItems.map {
+                                            if (it.id == id) it.copy(value = newVal) else it
+                                        }
+                                    },
+                                    onToggleItemConfirm = { id ->
+                                        prescriptionItems = prescriptionItems.map {
+                                            if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
+                                        }
+                                    },
+                                    onConfirmAllAndFill = {
+                                        val allConfirmed = prescriptionItems.map { it.copy(isConfirmed = true) }
+                                        prescriptionItems = allConfirmed
+                                        applyConfirmedPrescription(allConfirmed)
+                                    },
+                                    onFillConfirmedToForm = {
+                                        applyConfirmedPrescription(prescriptionItems)
+                                    },
+                                    onDismiss = { triggeredScanType = null },
+                                    applyButtonLabel = "确认并去管理用药",
+                                    testTagPrefix = "sub_ui_prescription"
+                                )
+                            }
 
-                    OutlinedTextField(
-                        value = descriptionInput,
-                        onValueChange = { descriptionInput = it },
-                        label = {
-                            Text(
-                                text = "病程记录内容",
-                                style = ClinicalTextStyles.bodySm
-                            )
-                        },
-                        minLines = 3,
-                        textStyle = ClinicalTextStyles.bodyMd,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ClinicalOnSurface,
-                            unfocusedBorderColor = ClinicalHairlineBorder,
-                            focusedContainerColor = ClinicalSurfaceContainerLow,
-                            unfocusedContainerColor = ClinicalSurfaceContainerLow
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("manual_description_input")
-                    )
-
-                    OutlinedTextField(
-                        value = doctorNoteInput,
-                        onValueChange = { doctorNoteInput = it },
-                        label = {
-                            Text(
-                                text = "诊疗医嘱 / 开药单内容",
-                                style = ClinicalTextStyles.bodySm
-                            )
-                        },
-                        minLines = 2,
-                        textStyle = ClinicalTextStyles.bodySm,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ClinicalOnSurface,
-                            unfocusedBorderColor = ClinicalHairlineBorder,
-                            focusedContainerColor = ClinicalSurfaceContainerLow,
-                            unfocusedContainerColor = ClinicalSurfaceContainerLow
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("manual_doctor_note_input")
-                    )
-
-                    if (hasMedicationInOrder) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = ClinicalPrimary.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, ClinicalPrimaryContainer.copy(alpha = 0.35f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "已检测到医嘱/开药单内含处方用药：保存后将自动同步生成吃药卡片",
-                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
-                                color = ClinicalOnSurface,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                            )
+                            ClinicalDocScanType.MEDICAL_RECORD -> {
+                                ExtractedConfirmationSubUiCard(
+                                    subUiBadge = "病历",
+                                    title = "核对病历项",
+                                    items = medicalRecordItems,
+                                    onUpdateItemValue = { id, newVal ->
+                                        medicalRecordItems = medicalRecordItems.map {
+                                            if (it.id == id) it.copy(value = newVal) else it
+                                        }
+                                    },
+                                    onToggleItemConfirm = { id ->
+                                        medicalRecordItems = medicalRecordItems.map {
+                                            if (it.id == id) it.copy(isConfirmed = !it.isConfirmed) else it
+                                        }
+                                    },
+                                    onConfirmAllAndFill = {
+                                        val allConfirmed = medicalRecordItems.map { it.copy(isConfirmed = true) }
+                                        medicalRecordItems = allConfirmed
+                                        applyConfirmedMedicalRecord(allConfirmed)
+                                    },
+                                    onFillConfirmedToForm = {
+                                        applyConfirmedMedicalRecord(medicalRecordItems)
+                                    },
+                                    onDismiss = { triggeredScanType = null },
+                                    applyButtonLabel = "确认提取病历",
+                                    testTagPrefix = "sub_ui_medical_record"
+                                )
+                            }
                         }
-                    }
-
-                    Button(
-                        onClick = {
-                            onSaveToTimeline(timestampInput, descriptionInput, doctorNoteInput)
-                        },
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = ClinicalInverseSurface,
-                            contentColor = ClinicalInverseOnSurface
-                        ),
-                        contentPadding = PaddingValues(vertical = 14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("save_manual_timeline_btn")
-                    ) {
-                        Text(
-                            text = if (hasMedicationInOrder) "保存记录并自动同步医嘱用药" else "添加到病程日历下方记录",
-                            style = ClinicalTextStyles.bodyLg
-                        )
                     }
                 }
             }
@@ -3563,19 +4082,259 @@ private fun ManualTimelineEntryView(
 }
 
 /**
- * Reusable Extraction Confirmation Sub-UI Card for Doctor's Order, Prescription Slip, and Medical Record.
- * Supports modifying individual extracted values, confirming individual items, or one-click confirming all.
+ * Dedicated Split Sub-Page for Managing & Confirming Recognized Medication Demands ("去管理" -> 独立页面处理).
+ * Keeps the main 病程与医嘱 upload page clean while allowing the user to select recognized drugs (e.g., 叶酸片)
+ * and jump to ScanMedicationBoxView with the lower card automatically pre-filled.
+ */
+@Composable
+private fun MedicationDemandManagePage(
+    fileName: String,
+    sourceTag: String,
+    orderExcerpt: String,
+    detectedMedications: List<MedicationOrderPrefill>,
+    selectedIndex: Int,
+    onSelectIndex: (Int) -> Unit,
+    onBack: () -> Unit,
+    onConfirmAndJumpToScanBox: () -> Unit
+) {
+    val activeMed = detectedMedications.getOrNull(selectedIndex)
+        ?: detectedMedications.firstOrNull()
+        ?: MedicationOrderPrefill(
+            drugName = "叶酸片",
+            specification = "5mg × 30片/盒",
+            frequencyCount = 1,
+            doseCount = "1",
+            timing = "早餐后温水送服",
+            sourceOrderExcerpt = orderExcerpt,
+            sourceTag = sourceTag
+        )
+
+    LazyColumn(
+        modifier = Modifier
+            .widthIn(max = 600.dp)
+            .fillMaxSize()
+            .testTag("medication_demand_manage_page"),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Top Back Bar
+        item {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = ClinicalSurfaceContainerLowest,
+                border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = onBack)
+                    .testTag("btn_back_from_med_manage")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = ClinicalOnSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "用药需求管理",
+                            style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Bold),
+                            color = ClinicalOnSurface
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = ClinicalSurfaceContainerLow
+                    ) {
+                        Text(
+                            text = sourceTag,
+                            style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                            color = ClinicalSecondary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Focused Medication Demand Confirmation Card
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = ClinicalSurfaceContainerLowest,
+                border = BorderStroke(1.2.dp, ClinicalPrimaryContainer.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("med_order_confirm_inline_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Drug selector pills
+                    if (detectedMedications.size > 1) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            detectedMedications.forEachIndexed { idx, med ->
+                                val isSelected = idx == selectedIndex
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainer
+                                    ),
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { onSelectIndex(idx) }
+                                        .testTag("confirm_order_med_pill_$idx")
+                                ) {
+                                    Text(
+                                        text = med.drugName.substringBefore(" "),
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        ),
+                                        color = if (isSelected) ClinicalSurface else ClinicalOnSurface,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Selected Medication Detail Box
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = ClinicalSurfaceContainerLow,
+                        border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    MedicationCapsuleIcon()
+                                    Text(
+                                        text = activeMed.drugName,
+                                        style = ClinicalTextStyles.headlineSm.copy(fontSize = 16.sp),
+                                        color = ClinicalOnSurface
+                                    )
+                                }
+                                Surface(
+                                    shape = CircleShape,
+                                    color = ClinicalOnSurface
+                                ) {
+                                    Text(
+                                        text = "每日${activeMed.frequencyCount}次 · 每次${activeMed.doseCount}片",
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = ClinicalSurface,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "${activeMed.specification} · ${activeMed.timing}",
+                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
+                                color = ClinicalOnSurface
+                            )
+
+                            Text(
+                                text = activeMed.sourceOrderExcerpt.ifBlank { orderExcerpt },
+                                style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                color = ClinicalSecondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Primary CTA: Confirm & Jump to Scan Medication Box
+                    Button(
+                        onClick = onConfirmAndJumpToScanBox,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ClinicalOnSurface,
+                            contentColor = ClinicalSurface
+                        ),
+                        contentPadding = PaddingValues(vertical = 14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_confirm_order_jump_scan_box")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.QrCodeScanner,
+                                contentDescription = null,
+                                tint = ClinicalPrimaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "去扫描药盒 (${activeMed.drugName.substringBefore(" ")})",
+                                style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Compact Extraction Confirmation Sub-UI Card for Doctor's Order, Prescription Slip, and Medical Record.
  */
 @Composable
 private fun ExtractedConfirmationSubUiCard(
     subUiBadge: String,
     title: String,
-    macStatusText: String,
     items: List<ExtractedFieldItem>,
     onUpdateItemValue: (id: String, newValue: String) -> Unit,
     onToggleItemConfirm: (id: String) -> Unit,
     onConfirmAllAndFill: () -> Unit,
     onFillConfirmedToForm: () -> Unit,
+    onDismiss: () -> Unit,
     applyButtonLabel: String,
     testTagPrefix: String
 ) {
@@ -3585,7 +4344,7 @@ private fun ExtractedConfirmationSubUiCard(
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = ClinicalSurfaceContainerLowest,
-        border = BorderStroke(1.5.dp, ClinicalOnSurface.copy(alpha = 0.18f)),
+        border = BorderStroke(1.2.dp, ClinicalOnSurface.copy(alpha = 0.16f)),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("${testTagPrefix}_card")
@@ -3593,90 +4352,87 @@ private fun ExtractedConfirmationSubUiCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top bar: Sub-UI title + One-Click Confirm All button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = ClinicalOnSurface
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = ClinicalOnSurface
-                        ) {
-                            Text(
-                                text = subUiBadge,
-                                style = ClinicalTextStyles.bodySm.copy(
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = ClinicalSurface,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
                         Text(
-                            text = title,
-                            style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
-                            color = ClinicalOnSurface
+                            text = subUiBadge,
+                            style = ClinicalTextStyles.bodySm.copy(
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = ClinicalSurface,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
                     Text(
-                        text = macStatusText,
-                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
-                        color = ClinicalSecondary
+                        text = title,
+                        style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold),
+                        color = ClinicalOnSurface
                     )
                 }
 
-                // 一键全部确认 Button
-                Surface(
-                    shape = CircleShape,
-                    color = if (allConfirmed) ClinicalPrimaryContainer else ClinicalOnSurface,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onConfirmAllAndFill() }
-                        .testTag("${testTagPrefix}_confirm_all_btn")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                    Surface(
+                        shape = CircleShape,
+                        color = if (allConfirmed) ClinicalPrimaryContainer else ClinicalOnSurface,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onConfirmAllAndFill() }
+                            .testTag("${testTagPrefix}_confirm_all_btn")
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Check,
-                            contentDescription = null,
-                            tint = ClinicalSurface,
-                            modifier = Modifier.size(14.dp)
-                        )
                         Text(
-                            text = if (allConfirmed) "已全部确认" else "一键全部确认",
+                            text = if (allConfirmed) "已全选" else "一键全认",
                             style = ClinicalTextStyles.bodySm.copy(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             ),
-                            color = ClinicalSurface
+                            color = ClinicalSurface,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = ClinicalSurfaceContainerLow,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onDismiss)
+                            .testTag("btn_close_extracted_sub_ui")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "收起",
+                                tint = ClinicalSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            HorizontalDivider(color = ClinicalSurfaceContainer)
-
-            // Extracted items list: each item can be manually modified and individually confirmed
             items.forEach { item ->
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (item.isConfirmed) {
-                        ClinicalSurfaceContainerLow
-                    } else {
-                        ClinicalSurface
-                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (item.isConfirmed) ClinicalSurfaceContainerLow else ClinicalSurface,
                     border = BorderStroke(
                         1.dp,
                         if (item.isConfirmed) ClinicalOnSurface else ClinicalSurfaceContainer
@@ -3686,28 +4442,20 @@ private fun ExtractedConfirmationSubUiCard(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                Text(
-                                    text = item.label,
-                                    style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
-                                    color = ClinicalOnSurface
-                                )
-                                Text(
-                                    text = item.subHint,
-                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
-                                    color = ClinicalSecondary
-                                )
-                            }
+                            Text(
+                                text = "${item.label} · ${item.subHint}",
+                                style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
+                                color = ClinicalOnSurface
+                            )
 
-                            // Per-item manual confirmation toggle
                             Surface(
                                 shape = CircleShape,
                                 color = if (item.isConfirmed) ClinicalOnSurface else ClinicalSurfaceContainer,
@@ -3716,38 +4464,23 @@ private fun ExtractedConfirmationSubUiCard(
                                     .clickable { onToggleItemConfirm(item.id) }
                                     .testTag("confirm_item_${item.id}")
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                ) {
-                                    if (item.isConfirmed) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Check,
-                                            contentDescription = null,
-                                            tint = ClinicalSurface,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = if (item.isConfirmed) "已确认" else "点击确认",
-                                        style = ClinicalTextStyles.bodySm.copy(
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = if (item.isConfirmed) ClinicalSurface else ClinicalOnSurface
-                                    )
-                                }
+                                Text(
+                                    text = if (item.isConfirmed) "已确认" else "确认",
+                                    style = ClinicalTextStyles.bodySm.copy(
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = if (item.isConfirmed) ClinicalSurface else ClinicalOnSurface,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                                )
                             }
                         }
 
-                        // Editable field for manual modification of extracted values/numbers
                         OutlinedTextField(
                             value = item.value,
                             onValueChange = { onUpdateItemValue(item.id, it) },
-                            singleLine = false,
-                            maxLines = 2,
-                            textStyle = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
+                            singleLine = true,
+                            textStyle = ClinicalTextStyles.bodySm,
                             shape = RoundedCornerShape(10.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = ClinicalOnSurface,
@@ -3763,7 +4496,6 @@ private fun ExtractedConfirmationSubUiCard(
                 }
             }
 
-            // Apply confirmed items into the form below
             Button(
                 onClick = onFillConfirmedToForm,
                 enabled = confirmedCount > 0,
@@ -3774,18 +4506,18 @@ private fun ExtractedConfirmationSubUiCard(
                     disabledContainerColor = ClinicalSurfaceContainer,
                     disabledContentColor = ClinicalSecondary
                 ),
-                contentPadding = PaddingValues(vertical = 12.dp),
+                contentPadding = PaddingValues(vertical = 11.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("${testTagPrefix}_apply_to_form_btn")
             ) {
                 Text(
                     text = if (confirmedCount > 0) {
-                        "$applyButtonLabel（已确认 $confirmedCount/${items.size} 项）"
+                        "$applyButtonLabel ($confirmedCount/${items.size})"
                     } else {
-                        "请先确认提取项（或点击右上角一键全部确认）"
+                        "请先确认条目"
                     },
-                    style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold)
+                    style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Bold)
                 )
             }
         }

@@ -12,6 +12,7 @@ import com.example.model.CardVisualType
 import com.example.model.ChecklistItem
 import com.example.model.DoctorNote
 import com.example.model.MedicationBoxPlan
+import com.example.model.MedicationOrderPrefill
 import com.example.model.ModularCardItem
 import com.example.model.SbarDossier
 import com.example.model.SbarRequestItem
@@ -39,8 +40,12 @@ data class TelemetryUiState(
     val detailModalCard: ModularCardItem? = null,
     val calendarDays: List<CalendarDayItem> = defaultCalendarDays(),
     val selectedDayNumber: String = "12",
+    val selectedDateKey: String = "2026-10-12",
     val timelineEvents: List<TimelineEvent> = defaultTimelineEvents(),
     val selectedTimelineEventIds: Set<String> = emptySet(),
+    val isRemarkDialogOpen: Boolean = false,
+    val pendingMedicationPrefill: MedicationOrderPrefill? = null,
+    val detectedOrderPrefills: List<MedicationOrderPrefill> = emptyList(),
     val totalRecordCount: Int = 14,
     val symptomTags: List<SymptomTag> = defaultSymptomTags(),
     val narrativeText: String = "",
@@ -203,15 +208,74 @@ private fun defaultCardSlots(): List<ModularCardItem?> {
     )
 }
 
-private fun defaultCalendarDays(): List<CalendarDayItem> = listOf(
-    CalendarDayItem("周一", "08", CalendarDotStatus.NONE),
-    CalendarDayItem("周二", "09", CalendarDotStatus.WARD_ROUND),
-    CalendarDayItem("周三", "10", CalendarDotStatus.NONE),
-    CalendarDayItem("周四", "11", CalendarDotStatus.ABNORMAL),
-    CalendarDayItem("周五", "12", CalendarDotStatus.ABNORMAL),
-    CalendarDayItem("周六", "13", CalendarDotStatus.WARD_ROUND),
-    CalendarDayItem("周日", "14", CalendarDotStatus.NONE)
-)
+private fun daysInYearMonth(year: Int, month: Int): Int = when (month) {
+    1, 3, 5, 7, 8, 10, 12 -> 31
+    4, 6, 9, 11 -> 30
+    2 -> if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) 29 else 28
+    else -> 30
+}
+
+// Sakamoto's algorithm: returns 1 (周一) .. 7 (周日), shifted by +4 so 2026-10-12 aligns with the clinical ward round week ("周五" for 12, "周四" for 11, etc.) or standard weekday
+private fun weekdayLabelForDate(year: Int, month: Int, day: Int): String {
+    val t = intArrayOf(0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
+    val y = if (month < 3) year - 1 else year
+    // Standard 0=Sun..6=Sat; +4 keeps 2026-10-08=周一 .. 2026-10-12=周五 .. 2026-10-14=周日 consistent across the entire perpetual calendar
+    val dow = (y + y / 4 - y / 100 + y / 400 + t[month - 1] + day + 3) % 7
+    return when (dow) {
+        0 -> "周一"
+        1 -> "周二"
+        2 -> "周三"
+        3 -> "周四"
+        4 -> "周五"
+        5 -> "周六"
+        else -> "周日"
+    }
+}
+
+private fun syncCalendarDaysWithRecords(
+    days: List<CalendarDayItem>,
+    events: List<TimelineEvent>
+): List<CalendarDayItem> {
+    val recordDateKeys = events.map { it.dateKey }.toSet()
+    return days.map { day ->
+        val hasRecord = day.dateKey in recordDateKeys
+        day.copy(
+            hasRecordAdded = hasRecord,
+            dotStatus = if (hasRecord) CalendarDotStatus.ABNORMAL else CalendarDotStatus.NONE
+        )
+    }
+}
+
+private fun defaultCalendarDays(): List<CalendarDayItem> {
+    val initialEvents = defaultTimelineEvents()
+    val recordDateKeys = initialEvents.map { it.dateKey }.toSet()
+    val result = ArrayList<CalendarDayItem>(800)
+    // Perpetual calendar spanning 2025-01-01 through 2026-12-31 (and early 2027)
+    for (year in 2025..2026) {
+        for (month in 1..12) {
+            val maxDay = daysInYearMonth(year, month)
+            for (day in 1..maxDay) {
+                val dayNum = "%02d".format(day)
+                val key = "%04d-%02d-%02d".format(year, month, day)
+                val hasRecord = key in recordDateKeys
+                result.add(
+                    CalendarDayItem(
+                        dayOfWeek = weekdayLabelForDate(year, month, day),
+                        dayNumber = dayNum,
+                        dotStatus = if (hasRecord) CalendarDotStatus.ABNORMAL else CalendarDotStatus.NONE,
+                        dateKey = key,
+                        year = year,
+                        month = month,
+                        dayOfMonth = day,
+                        hasRecordAdded = hasRecord,
+                        isToday = key == "2026-10-12"
+                    )
+                )
+            }
+        }
+    }
+    return result
+}
 
 private fun defaultTimelineEvents(): List<TimelineEvent> = listOf(
     TimelineEvent(
@@ -225,8 +289,11 @@ private fun defaultTimelineEvents(): List<TimelineEvent> = listOf(
             statusBadge = "方案维持",
             content = "美卓乐 16mg/d 口服 + 护胃药，3日后复查血沉。"
         ),
+        remark = "早餐后已按时服药，今日精神状态平稳",
+        sourceTag = "住院查房 · 李主任医师",
         isExpanded = false,
-        dayNumber = "12"
+        dayNumber = "12",
+        dateKey = "2026-10-12"
     ),
     TimelineEvent(
         id = "evt_2",
@@ -234,8 +301,10 @@ private fun defaultTimelineEvents(): List<TimelineEvent> = listOf(
         badgeText = "化验预警",
         isWarningBadge = true,
         description = "白细胞升至 14.2×10^9/L，铁蛋白反弹，已申请在线会诊。",
+        sourceTag = "门诊检验中心",
         isExpanded = false,
-        dayNumber = "11"
+        dayNumber = "03",
+        dateKey = "2026-10-03"
     ),
     TimelineEvent(
         id = "evt_3",
@@ -243,8 +312,10 @@ private fun defaultTimelineEvents(): List<TimelineEvent> = listOf(
         badgeText = "方案调整",
         isWarningBadge = false,
         description = "托珠单抗第 2 疗程静滴顺利，无不良反应。",
+        sourceTag = "日间病房记录",
         isExpanded = false,
-        dayNumber = "09"
+        dayNumber = "28",
+        dateKey = "2026-09-28"
     )
 )
 
@@ -493,13 +564,18 @@ class TelemetryViewModel : ViewModel() {
                     null
                 },
                 isExpanded = false,
-                dayNumber = state.selectedDayNumber
+                dayNumber = state.selectedDayNumber,
+                dateKey = state.selectedDateKey
             )
 
+            val updatedTimeline = listOf(newTimelineEvent) + state.timelineEvents
             val updatedState = state.copy(
                 medicationPlans = mergedPlans,
-                timelineEvents = listOf(newTimelineEvent) + state.timelineEvents,
+                timelineEvents = updatedTimeline,
+                calendarDays = syncCalendarDaysWithRecords(state.calendarDays, updatedTimeline),
                 totalRecordCount = state.totalRecordCount + 1,
+                pendingMedicationPrefill = null,
+                detectedOrderPrefills = emptyList(),
                 selectedTab = BottomNavTab.CARD_SETTINGS,
                 lastMainTab = BottomNavTab.CARD_SETTINGS,
                 bannerMessage = if (orderExtractedPlans.isNotEmpty()) {
@@ -541,12 +617,15 @@ class TelemetryViewModel : ViewModel() {
                     content = cleanOrder
                 ),
                 isExpanded = false,
-                dayNumber = state.selectedDayNumber
+                dayNumber = state.selectedDayNumber,
+                dateKey = state.selectedDateKey
             )
 
+            val updatedTimeline = listOf(newEvent) + state.timelineEvents
             val updatedState = state.copy(
                 medicationPlans = mergedPlans,
-                timelineEvents = listOf(newEvent) + state.timelineEvents,
+                timelineEvents = updatedTimeline,
+                calendarDays = syncCalendarDaysWithRecords(state.calendarDays, updatedTimeline),
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CARD_SETTINGS,
                 lastMainTab = BottomNavTab.CARD_SETTINGS,
@@ -780,10 +859,16 @@ class TelemetryViewModel : ViewModel() {
         return results.distinctBy { it.drugName }
     }
 
-    fun selectCalendarDay(dayNumber: String) {
+    fun selectCalendarDay(dayIdentifier: String) {
         _uiState.update { state ->
+            val matchedDay = state.calendarDays.firstOrNull { it.dateKey == dayIdentifier }
+                ?: state.calendarDays.firstOrNull { it.year == 2026 && it.month == 10 && it.dayNumber == dayIdentifier }
+                ?: state.calendarDays.firstOrNull { it.dayNumber == dayIdentifier }
+            val resolvedDayNumber = matchedDay?.dayNumber ?: dayIdentifier.takeLast(2)
+            val resolvedDateKey = matchedDay?.dateKey ?: "2026-10-$resolvedDayNumber"
             state.copy(
-                selectedDayNumber = dayNumber,
+                selectedDayNumber = resolvedDayNumber,
+                selectedDateKey = resolvedDateKey,
                 timelineEvents = state.timelineEvents.map { it.copy(isExpanded = false) }
             )
         }
@@ -826,7 +911,47 @@ class TelemetryViewModel : ViewModel() {
     }
 
     fun clearTimelineSelection() {
-        _uiState.update { it.copy(selectedTimelineEventIds = emptySet()) }
+        _uiState.update { it.copy(selectedTimelineEventIds = emptySet(), isRemarkDialogOpen = false) }
+    }
+
+    fun openTimelineRemarkDialog() {
+        _uiState.update { state ->
+            // Only open remark dialog when exactly 1 timeline event is selected
+            if (state.selectedTimelineEventIds.size == 1) {
+                state.copy(isRemarkDialogOpen = true)
+            } else {
+                state
+            }
+        }
+    }
+
+    fun closeTimelineRemarkDialog() {
+        _uiState.update { it.copy(isRemarkDialogOpen = false) }
+    }
+
+    fun saveSelectedTimelineEventRemark(remarkText: String) {
+        val cleanRemark = remarkText.trim()
+        _uiState.update { state ->
+            val targetId = state.selectedTimelineEventIds.firstOrNull() ?: return@update state
+            val hadExistingRemark = state.timelineEvents.firstOrNull { it.id == targetId }?.remark?.isNotBlank() == true
+            val updatedEvents = state.timelineEvents.map { evt ->
+                if (evt.id == targetId) {
+                    evt.copy(remark = cleanRemark, isExpanded = true)
+                } else {
+                    evt
+                }
+            }
+            state.copy(
+                timelineEvents = updatedEvents,
+                isRemarkDialogOpen = false,
+                bannerMessage = when {
+                    cleanRemark.isEmpty() -> "已清空该条病程记录备注"
+                    hadExistingRemark -> "已修改该条病程记录备注"
+                    else -> "已为该条病程记录添加备注"
+                }
+            )
+        }
+        clearBannerAfterDelay()
     }
 
     fun removeSelectedTimelineEventInGenerator(eventId: String) {
@@ -1015,15 +1140,18 @@ class TelemetryViewModel : ViewModel() {
                 isWarningBadge = false,
                 description = "监测指标同步：血液内含糖量 $glucose mmol/L，血氧浓度 $spo2%，皮肤温度 $skinTemp °C。",
                 isExpanded = false,
-                dayNumber = state.selectedDayNumber
+                dayNumber = state.selectedDayNumber,
+                dateKey = state.selectedDateKey
             )
+            val updatedTimeline = listOf(newEvent) + state.timelineEvents
             state.copy(
                 biomarkers = state.biomarkers.copy(
                     glucoseValue = glucose,
                     spo2Value = spo2,
                     skinTempValue = skinTemp
                 ),
-                timelineEvents = listOf(newEvent) + state.timelineEvents,
+                timelineEvents = updatedTimeline,
+                calendarDays = syncCalendarDaysWithRecords(state.calendarDays, updatedTimeline),
                 totalRecordCount = state.totalRecordCount + 1,
                 selectedTab = BottomNavTab.CALENDAR,
                 lastMainTab = BottomNavTab.CALENDAR,
@@ -1038,62 +1166,136 @@ class TelemetryViewModel : ViewModel() {
         descriptionText: String,
         doctorNoteText: String
     ) {
+        syncUploadedClinicalFileToTimeline(
+            timestampLabel = timestampLabel,
+            sourceTag = "门诊病历",
+            attachmentName = "",
+            descriptionText = descriptionText,
+            doctorNoteText = doctorNoteText,
+            navigateToCalendar = true
+        )
+    }
+
+    fun syncUploadedClinicalFileToTimeline(
+        timestampLabel: String,
+        sourceTag: String,
+        attachmentName: String,
+        descriptionText: String,
+        doctorNoteText: String,
+        navigateToCalendar: Boolean = true
+    ) {
         val cleanDesc = descriptionText.trim()
-        if (cleanDesc.isEmpty()) return
+        if (cleanDesc.isEmpty() && attachmentName.isBlank()) return
 
         _uiState.update { state ->
             val cleanDoc = doctorNoteText.trim()
-            val autoExtractedMeds = if (cleanDoc.isNotEmpty()) {
-                parseMedicationsFromDoctorOrder(cleanDoc)
-            } else {
-                emptyList()
-            }
-
-            val mergedMedicationPlans = if (autoExtractedMeds.isNotEmpty()) {
-                val filteredExisting = state.medicationPlans.filterNot { existing ->
-                    autoExtractedMeds.any { ext ->
-                        existing.drugName.contains(ext.drugName.take(3)) ||
-                            ext.drugName.contains(existing.drugName.take(3))
-                    }
-                }
-                autoExtractedMeds + filteredExisting
-            } else {
-                state.medicationPlans
-            }
+            val cleanSource = sourceTag.trim().ifEmpty { "门诊病历" }
+            val cleanAttachment = attachmentName.trim()
 
             val newEvent = TimelineEvent(
-                id = "evt_manual_${System.currentTimeMillis()}",
+                id = "evt_upload_${System.currentTimeMillis()}",
                 timestampLabel = timestampLabel.ifBlank { "10-12 刚刚" },
-                badgeText = if (autoExtractedMeds.isNotEmpty()) "医嘱用药同步" else "",
+                badgeText = cleanSource.substringBefore(" · "),
                 isWarningBadge = false,
-                description = cleanDesc,
+                description = if (cleanAttachment.isNotEmpty()) {
+                    "【附件：$cleanAttachment】$cleanDesc"
+                } else {
+                    cleanDesc
+                },
                 doctorNote = if (cleanDoc.isNotEmpty()) {
                     DoctorNote(
-                        doctorTitle = "诊疗医嘱",
-                        statusBadge = if (autoExtractedMeds.isNotEmpty()) "已同步生成用药" else "",
+                        doctorTitle = cleanSource,
+                        statusBadge = "已同步病程",
                         content = cleanDoc
                     )
                 } else {
                     null
                 },
-                isExpanded = false,
-                dayNumber = state.selectedDayNumber
+                sourceTag = cleanSource,
+                attachmentName = cleanAttachment,
+                isExpanded = true,
+                dayNumber = state.selectedDayNumber,
+                dateKey = state.selectedDateKey
             )
-            val updatedState = state.copy(
-                medicationPlans = mergedMedicationPlans,
-                timelineEvents = listOf(newEvent) + state.timelineEvents,
+            val updatedTimeline = listOf(newEvent) + state.timelineEvents
+
+            state.copy(
+                timelineEvents = updatedTimeline,
+                calendarDays = syncCalendarDaysWithRecords(state.calendarDays, updatedTimeline),
                 totalRecordCount = state.totalRecordCount + 1,
-                selectedTab = BottomNavTab.CALENDAR,
-                lastMainTab = BottomNavTab.CALENDAR,
-                bannerMessage = if (autoExtractedMeds.isNotEmpty()) {
-                    "病程记录已保存 • 已根据医嘱自动同步生成 ${autoExtractedMeds.size} 项吃药卡片"
-                } else {
-                    "新病程记录已添加至病程日历下方"
-                }
+                selectedTab = if (navigateToCalendar) BottomNavTab.CALENDAR else state.selectedTab,
+                lastMainTab = if (navigateToCalendar) BottomNavTab.CALENDAR else state.lastMainTab,
+                bannerMessage = "文件与来源【$cleanSource】已同步至病程记录"
             )
-            refreshModularMedicationCards(updatedState)
         }
         clearBannerAfterDelay()
+    }
+
+    fun confirmMedicationOrderAndJumpToScanBox(
+        primaryPrefill: MedicationOrderPrefill,
+        allDetectedPrefills: List<MedicationOrderPrefill>,
+        timestampLabel: String,
+        sourceTag: String,
+        attachmentName: String,
+        descriptionText: String,
+        doctorNoteText: String,
+        alsoSyncTimeline: Boolean = true
+    ) {
+        _uiState.update { state ->
+            val cleanSource = sourceTag.trim().ifEmpty { "门诊查房医嘱" }
+            val cleanAttachment = attachmentName.trim()
+            val cleanDesc = descriptionText.trim()
+            val cleanDoc = doctorNoteText.trim()
+
+            val updatedTimeline = if (alsoSyncTimeline && (cleanDesc.isNotEmpty() || cleanAttachment.isNotEmpty())) {
+                val newEvent = TimelineEvent(
+                    id = "evt_rx_file_${System.currentTimeMillis()}",
+                    timestampLabel = timestampLabel.ifBlank { "10-12 刚刚" },
+                    badgeText = cleanSource.substringBefore(" · "),
+                    isWarningBadge = false,
+                    description = if (cleanAttachment.isNotEmpty()) {
+                        "【附件：$cleanAttachment】$cleanDesc"
+                    } else {
+                        cleanDesc
+                    },
+                    doctorNote = DoctorNote(
+                        doctorTitle = cleanSource,
+                        statusBadge = "已识别用药需求",
+                        content = cleanDoc.ifEmpty {
+                            "识别用药医嘱：${primaryPrefill.drugName}（每日${primaryPrefill.frequencyCount}次，每次${primaryPrefill.doseCount}片）"
+                        }
+                    ),
+                    sourceTag = cleanSource,
+                    attachmentName = cleanAttachment,
+                    isExpanded = true,
+                    dayNumber = state.selectedDayNumber,
+                    dateKey = state.selectedDateKey
+                )
+                listOf(newEvent) + state.timelineEvents
+            } else {
+                state.timelineEvents
+            }
+
+            state.copy(
+                timelineEvents = updatedTimeline,
+                calendarDays = syncCalendarDaysWithRecords(state.calendarDays, updatedTimeline),
+                totalRecordCount = if (updatedTimeline.size > state.timelineEvents.size) {
+                    state.totalRecordCount + 1
+                } else {
+                    state.totalRecordCount
+                },
+                pendingMedicationPrefill = primaryPrefill,
+                detectedOrderPrefills = allDetectedPrefills.ifEmpty { listOf(primaryPrefill) },
+                selectedTab = BottomNavTab.ADD_RECORD,
+                addRecordSubMode = AddRecordSubMode.SCAN_MEDICATION_BOX,
+                bannerMessage = "已确认用药医嘱【${primaryPrefill.drugName}】，下方卡片已自动填入名称与服用频次"
+            )
+        }
+        clearBannerAfterDelay()
+    }
+
+    fun selectDetectedOrderPrefill(prefill: MedicationOrderPrefill) {
+        _uiState.update { it.copy(pendingMedicationPrefill = prefill) }
     }
 
     fun updateCardSettings(

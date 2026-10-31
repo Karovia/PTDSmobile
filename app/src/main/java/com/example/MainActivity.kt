@@ -257,7 +257,9 @@ fun ClinicalTelemetryApp(
                                             onToggleTimelineEvent = viewModel::toggleTimelineEvent,
                                             onLongPressTimelineEvent = viewModel::toggleTimelineEventSelection,
                                             onSelectAllTimelineEvents = viewModel::selectAllTimelineEvents,
-                                            onClearTimelineSelection = viewModel::clearTimelineSelection
+                                            onClearTimelineSelection = viewModel::clearTimelineSelection,
+                                            onCloseRemarkDialog = viewModel::closeTimelineRemarkDialog,
+                                            onSaveEventRemark = viewModel::saveSelectedTimelineEventRemark
                                         )
                                     }
 
@@ -266,12 +268,42 @@ fun ClinicalTelemetryApp(
                                             subMode = currentSubMode,
                                             currentBiomarkers = uiState.biomarkers,
                                             medicationPlans = uiState.medicationPlans,
+                                            pendingMedicationPrefill = uiState.pendingMedicationPrefill,
+                                            detectedOrderPrefills = uiState.detectedOrderPrefills,
+                                            onSelectDetectedOrderPrefill = viewModel::selectDetectedOrderPrefill,
                                             onSelectSubMode = viewModel::setAddRecordSubMode,
                                             onNavigateBack = viewModel::navigateBackFromAddRecord,
                                             onSyncRecognizedIndicators = viewModel::syncRecognizedIndicators,
                                             onAddScannedMedicationBox = viewModel::addScannedMedicationBox,
                                             onSyncMedicationsFromDoctorOrder = viewModel::syncMedicationsFromDoctorOrder,
-                                            onAddManualTimelineRecord = viewModel::addManualTimelineRecord
+                                            onAddManualTimelineRecord = viewModel::addManualTimelineRecord,
+                                            onSyncUploadedFileToTimeline = { fileName, sourceTag, timestampLabel, summaryDescription, doctorOrderText, remarkText ->
+                                                val descWithRemark = if (remarkText.isNotBlank()) {
+                                                    "$summaryDescription（备注：${remarkText.trim()}）"
+                                                } else {
+                                                    summaryDescription
+                                                }
+                                                viewModel.syncUploadedClinicalFileToTimeline(
+                                                    timestampLabel = timestampLabel,
+                                                    sourceTag = sourceTag,
+                                                    attachmentName = fileName,
+                                                    descriptionText = descWithRemark,
+                                                    doctorNoteText = doctorOrderText,
+                                                    navigateToCalendar = true
+                                                )
+                                            },
+                                            onConfirmMedicationOrderAndJumpToScanBox = { selectedPrefill, allDetectedPrefills, alsoSyncToTimeline, fileName, sourceTag, summaryDescription ->
+                                                viewModel.confirmMedicationOrderAndJumpToScanBox(
+                                                    primaryPrefill = selectedPrefill,
+                                                    allDetectedPrefills = allDetectedPrefills,
+                                                    timestampLabel = "10-12 今天 15:20",
+                                                    sourceTag = sourceTag,
+                                                    attachmentName = fileName,
+                                                    descriptionText = summaryDescription,
+                                                    doctorNoteText = selectedPrefill.sourceOrderExcerpt,
+                                                    alsoSyncTimeline = alsoSyncToTimeline
+                                                )
+                                            }
                                         )
                                     }
 
@@ -329,12 +361,26 @@ fun ClinicalTelemetryApp(
                                     scaleOut(targetScale = 0.92f, animationSpec = tween(180)),
                                 modifier = Modifier.align(Alignment.BottomCenter)
                             ) {
+                                val singleSelectedId = if (
+                                    uiState.selectedTab == BottomNavTab.CALENDAR &&
+                                    uiState.selectedTimelineEventIds.size == 1
+                                ) {
+                                    uiState.selectedTimelineEventIds.firstOrNull()
+                                } else {
+                                    null
+                                }
+                                val singleEventHasRemark = singleSelectedId?.let { id ->
+                                    uiState.timelineEvents.find { it.id == id }?.remark?.isNotBlank() == true
+                                } ?: false
+
                                 FloatingAddRecordCapsuleButton(
                                     selectedTimelineCount = if (uiState.selectedTab == BottomNavTab.CALENDAR) {
                                         uiState.selectedTimelineEventIds.size
                                     } else {
                                         0
                                     },
+                                    selectedSingleEventHasRemark = singleEventHasRemark,
+                                    onEditTimelineRemark = viewModel::openTimelineRemarkDialog,
                                     onGenerateTimelineRecord = viewModel::openTelemetryDetail,
                                     onClearTimelineSelection = viewModel::clearTimelineSelection,
                                     onSelectAddSubMode = { subMode ->

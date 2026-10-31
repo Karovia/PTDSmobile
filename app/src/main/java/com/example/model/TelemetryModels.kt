@@ -65,8 +65,17 @@ enum class CalendarDotStatus {
 data class CalendarDayItem(
     val dayOfWeek: String,
     val dayNumber: String,
-    val dotStatus: CalendarDotStatus
-)
+    val dotStatus: CalendarDotStatus = CalendarDotStatus.NONE,
+    val dateKey: String = "2026-10-$dayNumber",
+    val year: Int = 2026,
+    val month: Int = 10,
+    val dayOfMonth: Int = dayNumber.toIntOrNull() ?: 12,
+    val hasRecordAdded: Boolean = false,
+    val isToday: Boolean = false
+) {
+    val headerYearMonth: String
+        get() = "${year}年${month}月"
+}
 
 data class DoctorNote(
     val doctorTitle: String,
@@ -81,8 +90,22 @@ data class TimelineEvent(
     val isWarningBadge: Boolean = false,
     val description: String,
     val doctorNote: DoctorNote? = null,
+    val remark: String = "",
+    val sourceTag: String = "",
+    val attachmentName: String = "",
     val isExpanded: Boolean = false,
-    val dayNumber: String = "12"
+    val dayNumber: String = "12",
+    val dateKey: String = "2026-10-$dayNumber"
+)
+
+data class MedicationOrderPrefill(
+    val drugName: String,
+    val specification: String,
+    val frequencyCount: Int,
+    val doseCount: String,
+    val timing: String,
+    val sourceOrderExcerpt: String = "",
+    val sourceTag: String = ""
 )
 
 data class SymptomTag(

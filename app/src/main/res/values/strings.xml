@@ -12,8 +12,8 @@
     <string name="plt_label">血氧浓度</string>
     <string name="crp_label">皮肤温度</string>
     <string name="timeline_header">2026年10月</string>
-    <string name="legend_abnormal">异常</string>
-    <string name="legend_ward_round">查房</string>
+    <string name="legend_abnormal">已添记录</string>
+    <string name="legend_ward_round">万年历</string>
     <string name="event_logs_header">病程动态记录</string>
     <string name="footer_engine">临床指标与病程追踪</string>
     <string name="footer_enclave">本地健康档案安全存储</string>

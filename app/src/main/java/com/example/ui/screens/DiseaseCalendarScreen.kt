@@ -36,14 +36,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -56,11 +61,19 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,6 +118,8 @@ fun DiseaseCalendarScreen(
     onLongPressTimelineEvent: (String) -> Unit,
     onSelectAllTimelineEvents: () -> Unit,
     onClearTimelineSelection: () -> Unit,
+    onCloseRemarkDialog: () -> Unit = {},
+    onSaveEventRemark: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val biomarkers = uiState.biomarkers
@@ -158,11 +173,12 @@ fun DiseaseCalendarScreen(
                 )
             }
 
-            // 2. Weekly Disease Calendar Strip
+            // 2. Perpetual & Scrollable Disease Calendar Card
             item(key = "weekly_calendar") {
                 WeeklyDiseaseCalendarCard(
                     days = uiState.calendarDays,
                     selectedDayNumber = uiState.selectedDayNumber,
+                    selectedDateKey = uiState.selectedDateKey,
                     onSelectDay = onSelectDay
                 )
             }
@@ -189,19 +205,6 @@ fun DiseaseCalendarScreen(
                             style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.SemiBold),
                             color = if (isSelectionMode) ClinicalOnSurface else ClinicalSecondary
                         )
-                        if (!isSelectionMode) {
-                            Surface(
-                                shape = CircleShape,
-                                color = ClinicalSurfaceContainer
-                            ) {
-                                Text(
-                                    text = "长按多选",
-                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 10.sp),
-                                    color = ClinicalSecondary,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
                     }
 
                     if (isSelectionMode) {
@@ -264,6 +267,21 @@ fun DiseaseCalendarScreen(
                     onLongPress = { onLongPressTimelineEvent(event.id) }
                 )
             }
+        }
+
+        // Single-selected Timeline Event Add / Edit Remark Dialog
+        val singleSelectedEvent = if (uiState.selectedTimelineEventIds.size == 1) {
+            val targetId = uiState.selectedTimelineEventIds.first()
+            uiState.timelineEvents.firstOrNull { it.id == targetId }
+        } else {
+            null
+        }
+        if (uiState.isRemarkDialogOpen && singleSelectedEvent != null) {
+            TimelineEventRemarkDialog(
+                event = singleSelectedEvent,
+                onDismiss = onCloseRemarkDialog,
+                onSaveRemark = onSaveEventRemark
+            )
         }
     }
 }
@@ -864,8 +882,49 @@ private fun CardSlotCell(
 private fun WeeklyDiseaseCalendarCard(
     days: List<CalendarDayItem>,
     selectedDayNumber: String,
+    selectedDateKey: String = "2026-10-$selectedDayNumber",
     onSelectDay: (String) -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val initialIndex = remember(days) {
+        days.indexOfFirst { it.dateKey == "2026-10-08" }
+            .takeIf { it >= 0 }
+            ?: days.indexOfFirst { it.dateKey == selectedDateKey }.coerceAtLeast(0)
+    }
+    val stripListState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    var isPerpetualExpanded by remember { mutableStateOf(false) }
+
+    // Real-time visible Year & Month updated dynamically as the user scrolls left/right
+    val visibleYearMonthPair by remember(days) {
+        derivedStateOf {
+            val visibleItems = stripListState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isNotEmpty()) {
+                val centerInfo = visibleItems[visibleItems.size / 2]
+                val centerDay = days.getOrNull(centerInfo.index)
+                if (centerDay != null) {
+                    Pair(centerDay.year, centerDay.month)
+                } else {
+                    Pair(2026, 10)
+                }
+            } else {
+                val fallback = days.firstOrNull { it.dateKey == selectedDateKey }
+                if (fallback != null) Pair(fallback.year, fallback.month) else Pair(2026, 10)
+            }
+        }
+    }
+
+    val activeYear = visibleYearMonthPair.first
+    val activeMonth = visibleYearMonthPair.second
+    val dynamicHeaderText = "${activeYear}年${activeMonth}月"
+
+    fun scrollToYearMonth(targetYear: Int, targetMonth: Int) {
+        val targetIndex = days.indexOfFirst { it.year == targetYear && it.month == targetMonth && it.dayOfMonth == 1 }
+            .takeIf { it >= 0 } ?: return
+        coroutineScope.launch {
+            stripListState.animateScrollToItem(targetIndex)
+        }
+    }
+
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = ClinicalSurfaceContainerLowest,
@@ -877,111 +936,101 @@ private fun WeeklyDiseaseCalendarCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 14.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Top Header: Clickable Live Year-Month (updates on scroll; tap to toggle secondary perpetual calendar menu)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { isPerpetualExpanded = !isPerpetualExpanded }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .testTag("calendar_dynamic_month_header")
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.EventRepeat,
-                        contentDescription = null,
-                        tint = ClinicalOnSurface,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.timeline_header),
-                        style = ClinicalTextStyles.cardTitleSm,
-                        color = ClinicalOnSurface
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(ClinicalPrimaryContainer, CircleShape)
-                        )
-                        Text(
-                            text = stringResource(R.string.legend_abnormal),
-                            style = ClinicalTextStyles.bodySm,
-                            color = ClinicalSecondary
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(ClinicalOnSurface, CircleShape)
-                        )
-                        Text(
-                            text = stringResource(R.string.legend_ward_round),
-                            style = ClinicalTextStyles.bodySm,
-                            color = ClinicalSecondary
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Filled.EventRepeat,
+                    contentDescription = null,
+                    tint = ClinicalOnSurface,
+                    modifier = Modifier.size(17.dp)
+                )
+                Text(
+                    text = dynamicHeaderText,
+                    style = ClinicalTextStyles.cardTitleSm,
+                    color = ClinicalOnSurface
+                )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            // Widened Horizontally Scrollable Perpetual Date Strip (swipe from Oct back to Jan or earlier)
+            LazyRow(
+                state = stripListState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("perpetual_date_strip"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp)
             ) {
-                days.forEach { dayItem ->
-                    val isSelected = dayItem.dayNumber == selectedDayNumber
+                items(
+                    items = days,
+                    key = { it.dateKey }
+                ) { dayItem ->
+                    val isSelected = if (days.size > 14) {
+                        dayItem.dateKey == selectedDateKey
+                    } else {
+                        dayItem.dayNumber == selectedDayNumber
+                    }
                     val bgColor = if (isSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow
                     val dayLabelColor = if (isSelected) ClinicalSecondaryContainer else ClinicalSecondary
                     val numColor = if (isSelected) ClinicalSurface else ClinicalOnSurface
-                    val dotColor = when (dayItem.dotStatus) {
-                        CalendarDotStatus.NONE -> Color.Transparent
-                        CalendarDotStatus.WARD_ROUND -> if (isSelected) ClinicalSurface else ClinicalOnSurface
-                        CalendarDotStatus.ABNORMAL -> ClinicalPrimaryContainer
+                    // Red dot ONLY indicates a record was added on this day (no dot if no record added)
+                    val hasRecordOnDay = dayItem.hasRecordAdded || dayItem.dotStatus == CalendarDotStatus.ABNORMAL
+                    val dotColor = if (hasRecordOnDay) ClinicalPrimaryContainer else Color.Transparent
+
+                    val itemTag = if (dayItem.year == 2026 && dayItem.month == 10) {
+                        "calendar_day_${dayItem.dayNumber}"
+                    } else {
+                        "calendar_day_${dayItem.dateKey}"
                     }
 
                     Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(CircleShape)
-                            .background(bgColor, CircleShape)
+                            .width(48.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(bgColor, RoundedCornerShape(24.dp))
                             .then(
                                 if (isSelected) {
                                     Modifier.border(
                                         width = 2.dp,
                                         color = ClinicalOnSurface.copy(alpha = 0.2f),
-                                        shape = CircleShape
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                } else if (dayItem.isToday) {
+                                    Modifier.border(
+                                        width = 1.dp,
+                                        color = ClinicalOnSurface.copy(alpha = 0.35f),
+                                        shape = RoundedCornerShape(24.dp)
                                     )
                                 } else {
                                     Modifier
                                 }
                             )
-                            .clickable { onSelectDay(dayItem.dayNumber) }
-                            .padding(vertical = 10.dp, horizontal = 2.dp)
-                            .testTag("calendar_day_${dayItem.dayNumber}"),
+                            .clickable { onSelectDay(dayItem.dateKey) }
+                            .padding(vertical = 12.dp, horizontal = 4.dp)
+                            .testTag(itemTag),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = dayItem.dayOfWeek,
-                            style = ClinicalTextStyles.labelMonoSm.copy(letterSpacing = 0.2.sp),
+                            text = if (dayItem.isToday) "今天" else dayItem.dayOfWeek,
+                            style = ClinicalTextStyles.labelMonoSm.copy(
+                                fontSize = 11.sp,
+                                letterSpacing = 0.2.sp,
+                                fontWeight = if (dayItem.isToday || isSelected) FontWeight.Bold else FontWeight.Normal
+                            ),
                             color = dayLabelColor
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(5.dp))
                         Text(
                             text = dayItem.dayNumber,
                             style = ClinicalTextStyles.labelMonoLg,
@@ -992,7 +1041,203 @@ private fun WeeklyDiseaseCalendarCard(
                             modifier = Modifier
                                 .size(6.dp)
                                 .background(dotColor, CircleShape)
+                                .testTag("calendar_dot_${dayItem.dateKey}")
                         )
+                    }
+                }
+            }
+
+            // Expandable Full Perpetual Calendar (万年历) with Year/Month Bar & Month Grid
+            AnimatedVisibility(
+                visible = isPerpetualExpanded,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(180)) + fadeOut(tween(150))
+            ) {
+                val monthDays = remember(days, activeYear, activeMonth) {
+                    days.filter { it.year == activeYear && it.month == activeMonth }
+                }
+                val weekHeaders = remember { listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日") }
+                val leadingEmptyCount = remember(monthDays) {
+                    val firstDow = monthDays.firstOrNull()?.dayOfWeek ?: "周一"
+                    weekHeaders.indexOf(firstDow).coerceAtLeast(0)
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .testTag("perpetual_calendar_expanded_panel"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    HorizontalDivider(color = ClinicalSurfaceContainer)
+
+                    // Year switcher + "回到今天" button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(2025, 2026).forEach { yr ->
+                                val isYrSelected = activeYear == yr
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isYrSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { scrollToYearMonth(yr, activeMonth) }
+                                        .testTag("perpetual_year_$yr")
+                                ) {
+                                    Text(
+                                        text = "${yr}年",
+                                        style = ClinicalTextStyles.bodySm.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isYrSelected) FontWeight.Bold else FontWeight.Medium
+                                        ),
+                                        color = if (isYrSelected) ClinicalSurface else ClinicalOnSurface,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = ClinicalSurfaceContainerLow,
+                            border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    onSelectDay("2026-10-12")
+                                    val todayIdx = days.indexOfFirst { it.dateKey == "2026-10-08" }
+                                        .takeIf { it >= 0 } ?: 0
+                                    coroutineScope.launch {
+                                        stripListState.animateScrollToItem(todayIdx)
+                                    }
+                                }
+                                .testTag("btn_jump_to_today")
+                        ) {
+                            Text(
+                                text = "回到今天 (10-12)",
+                                style = ClinicalTextStyles.bodySm.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = ClinicalOnSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // 1月 .. 12月 Horizontal Quick Month Selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        (1..12).forEach { m ->
+                            val isMonthSelected = activeMonth == m
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isMonthSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable { scrollToYearMonth(activeYear, m) }
+                                    .testTag("perpetual_month_$m")
+                            ) {
+                                Text(
+                                    text = "${m}月",
+                                    style = ClinicalTextStyles.bodySm.copy(
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isMonthSelected) FontWeight.Bold else FontWeight.Medium
+                                    ),
+                                    color = if (isMonthSelected) ClinicalSurface else ClinicalOnSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 7-Column Weekday Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        weekHeaders.forEach { wd ->
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = wd,
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 10.sp),
+                                    color = ClinicalSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    // Full Month Days Grid
+                    val totalCells = leadingEmptyCount + monthDays.size
+                    val rowCount = (totalCells + 6) / 7
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (r in 0 until rowCount) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                for (c in 0 until 7) {
+                                    val cellIdx = r * 7 + c
+                                    val dayIdx = cellIdx - leadingEmptyCount
+                                    val dayCell = monthDays.getOrNull(dayIdx)
+                                    if (dayCell != null) {
+                                        val isCellSelected = dayCell.dateKey == selectedDateKey
+                                        val hasCellRecord = dayCell.hasRecordAdded || dayCell.dotStatus == CalendarDotStatus.ABNORMAL
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(
+                                                    if (isCellSelected) ClinicalOnSurface else ClinicalSurfaceContainerLow,
+                                                    RoundedCornerShape(12.dp)
+                                                )
+                                                .clickable {
+                                                    onSelectDay(dayCell.dateKey)
+                                                    val targetStripIdx = days.indexOfFirst { it.dateKey == dayCell.dateKey }
+                                                        .coerceAtLeast(0)
+                                                    coroutineScope.launch {
+                                                        stripListState.animateScrollToItem(
+                                                            (targetStripIdx - 2).coerceAtLeast(0)
+                                                        )
+                                                    }
+                                                }
+                                                .padding(vertical = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = dayCell.dayNumber,
+                                                style = ClinicalTextStyles.labelMonoSm.copy(
+                                                    fontWeight = if (isCellSelected || dayCell.isToday) FontWeight.Bold else FontWeight.Normal
+                                                ),
+                                                color = if (isCellSelected) ClinicalSurface else ClinicalOnSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .background(
+                                                        if (hasCellRecord) ClinicalPrimaryContainer else Color.Transparent,
+                                                        CircleShape
+                                                    )
+                                            )
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1113,6 +1358,21 @@ private fun TimelineEventCard(
                             }
                         }
                     }
+
+                    if (event.remark.isNotBlank()) {
+                        Surface(
+                            shape = CircleShape,
+                            color = ClinicalOnSurface.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, ClinicalOnSurface.copy(alpha = 0.2f))
+                        ) {
+                            Text(
+                                text = "已备注",
+                                style = ClinicalTextStyles.bodySm.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                color = ClinicalOnSurface,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Box(
@@ -1134,6 +1394,17 @@ private fun TimelineEventCard(
                 }
             }
 
+            if (!event.isExpanded && event.remark.isNotBlank()) {
+                Text(
+                    text = "备注：${event.remark}",
+                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                    color = ClinicalSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+
             AnimatedVisibility(
                 visible = event.isExpanded,
                 enter = expandVertically() + fadeIn(),
@@ -1145,6 +1416,44 @@ private fun TimelineEventCard(
                         .padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    if (event.sourceTag.isNotBlank() || event.attachmentName.isNotBlank()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (event.sourceTag.isNotBlank()) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = ClinicalSurfaceContainerLow,
+                                    border = BorderStroke(1.dp, ClinicalSurfaceContainer)
+                                ) {
+                                    Text(
+                                        text = "来源：${event.sourceTag}",
+                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                                        color = ClinicalSecondary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            if (event.attachmentName.isNotBlank()) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = ClinicalSurfaceContainerLow,
+                                    border = BorderStroke(1.dp, ClinicalSurfaceContainer)
+                                ) {
+                                    Text(
+                                        text = "文件：${event.attachmentName}",
+                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                                        color = ClinicalOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Text(
                         text = event.description,
                         style = ClinicalTextStyles.bodyMd,
@@ -1195,10 +1504,214 @@ private fun TimelineEventCard(
                             }
                         }
                     }
+
+                    if (event.remark.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = ClinicalSurfaceContainerLow,
+                            border = BorderStroke(1.dp, ClinicalOnSurface.copy(alpha = 0.18f))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "病程备注",
+                                    style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                                    color = ClinicalOnSurface
+                                )
+                                Text(
+                                    text = event.remark,
+                                    style = ClinicalTextStyles.bodySm,
+                                    color = ClinicalOnSurface
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun TimelineEventRemarkDialog(
+    event: TimelineEvent,
+    onDismiss: () -> Unit,
+    onSaveRemark: (String) -> Unit
+) {
+    val isEditingExisting = event.remark.isNotBlank()
+    var remarkInput by remember(event.id, event.remark) { mutableStateOf(event.remark) }
+    val quickRemarkSuggestions = remember {
+        listOf(
+            "今日状态平稳，按时服药",
+            "服药后轻微胃部不适",
+            "待下次门诊复诊时向主任确认",
+            "家属已核对医嘱与剂量"
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ClinicalSurfaceContainerLowest,
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = if (isEditingExisting) "修改病程备注" else "添加病程备注",
+                        style = ClinicalTextStyles.cardTitleSm,
+                        color = ClinicalOnSurface
+                    )
+                    Text(
+                        text = "${event.timestampLabel} ${event.badgeText}".trim(),
+                        style = ClinicalTextStyles.bodySm,
+                        color = ClinicalSecondary
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "关闭",
+                        tint = ClinicalOnSurface,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = ClinicalSurfaceContainerLow,
+                    border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = event.description,
+                        style = ClinicalTextStyles.bodySm,
+                        color = ClinicalSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = remarkInput,
+                    onValueChange = { remarkInput = it },
+                    label = {
+                        Text(
+                            text = if (isEditingExisting) "编辑备注内容" else "输入备注内容",
+                            style = ClinicalTextStyles.bodySm
+                        )
+                    },
+                    placeholder = {
+                        Text(
+                            text = "记录当时体征感受、服药反应或复诊待问事项...",
+                            style = ClinicalTextStyles.bodySm,
+                            color = ClinicalSecondary
+                        )
+                    },
+                    minLines = 3,
+                    textStyle = ClinicalTextStyles.bodyMd,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ClinicalOnSurface,
+                        unfocusedBorderColor = ClinicalHairlineBorder,
+                        focusedContainerColor = ClinicalSurfaceContainerLow,
+                        unfocusedContainerColor = ClinicalSurfaceContainerLow
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("timeline_remark_input")
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "快捷备注标签：",
+                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                        color = ClinicalSecondary
+                    )
+                    quickRemarkSuggestions.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowItems.forEach { suggestion ->
+                                Surface(
+                                    shape = CircleShape,
+                                    color = ClinicalSurfaceContainerLow,
+                                    border = BorderStroke(1.dp, ClinicalSurfaceContainer),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            remarkInput = if (remarkInput.isBlank()) {
+                                                suggestion
+                                            } else {
+                                                "${remarkInput.trimEnd('；', '。')}；$suggestion"
+                                            }
+                                        }
+                                ) {
+                                    Text(
+                                        text = suggestion,
+                                        style = ClinicalTextStyles.bodySm.copy(fontSize = 11.sp),
+                                        color = ClinicalOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            if (isEditingExisting) {
+                TextButton(
+                    onClick = { onSaveRemark("") },
+                    modifier = Modifier.testTag("btn_clear_timeline_remark")
+                ) {
+                    Text(
+                        text = "清空备注",
+                        style = ClinicalTextStyles.bodySm.copy(fontWeight = FontWeight.Medium),
+                        color = ClinicalPrimaryContainer
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSaveRemark(remarkInput) },
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = ClinicalOnSurface,
+                    contentColor = ClinicalSurface
+                ),
+                modifier = Modifier.testTag("btn_save_timeline_remark")
+            ) {
+                Text(
+                    text = if (isEditingExisting) "保存修改" else "保存备注",
+                    style = ClinicalTextStyles.bodyMd.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+        }
+    )
 }
 
 @Composable
